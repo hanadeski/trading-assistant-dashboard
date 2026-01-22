@@ -1,5 +1,7 @@
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent))
 import streamlit as st
-
 from engine.profiles import get_profiles
 from engine.decision_layer import run_decisions
 from data.mock_data import mock_factors_for_symbols

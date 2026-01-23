@@ -5,6 +5,8 @@ sys.path.append(str(Path(__file__).parent))
 import streamlit as st
 from engine.profiles import get_profiles
 from engine.decision_layer import run_decisions
+from engine.fvg import detect_fvgs
+
 # live data import
 from data.live_data import fetch_ohlc
 
@@ -107,20 +109,36 @@ for sym in symbols:
 
     certified = liquidity_ok and structure_ok and rr >= 3.0
 
+near_fvg = False
+try:
+    fvgs = detect_fvgs(df, lookback=160)
+    last_price = float(df["close"].iloc[-1])
+    pad = last_price * 0.0003  # ~3 bps tolerance
+
+    for z in fvgs[-3:]:  # only most recent FVGs
+        top = max(z["top"], z["bottom"]) + pad
+        bot = min(z["top"], z["bottom"]) - pad
+        if bot <= last_price <= top:
+            near_fvg = True
+            break
+except Exception:
+    near_fvg = False
+
     factors_by_symbol[sym] = {
-        "bias": bias,
-        "session_boost": 0.5,
-        "structure_ok": structure_ok,
-        "liquidity_ok": liquidity_ok,
-        "certified": certified,
-        "rr": rr,
-        "news_risk": "none",
-        "volatility_risk": "normal",
-        "entry": round(entry, 5),
-        "stop": round(stop, 5) if isinstance(stop, float) else stop,
-        "tp1": round(tp1, 5) if isinstance(tp1, float) else tp1,
-        "tp2": round(tp2, 5) if isinstance(tp2, float) else tp2,
-    }
+    "bias": bias,
+    "session_boost": 0.5,
+    "structure_ok": structure_ok,
+    "liquidity_ok": liquidity_ok,
+    "certified": certified,
+    "rr": rr,
+    "near_fvg": near_fvg,   # ← 4.3.1 COMPLETE
+    "news_risk": "none",
+    "volatility_risk": "normal",
+    "entry": round(entry, 5),
+    "stop": round(stop, 5) if isinstance(stop, float) else stop,
+    "tp1": round(tp1, 5) if isinstance(tp1, float) else tp1,
+    "tp2": round(tp2, 5) if isinstance(tp2, float) else tp2,
+}
 
 decisions = run_decisions(profiles, factors_by_symbol)
 decisions_by_symbol = {d.symbol: d for d in decisions}

@@ -45,6 +45,13 @@ def fetch_ohlc(symbol: str, interval: str = "15m", period: str = "5d") -> pd.Dat
         auto_adjust=False,
         threads=False,
     )
+# yfinance sometimes returns MultiIndex columns; flatten if needed
+if hasattr(df.columns, "levels"):
+    df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
+# Ensure numeric
+for col in ["Open", "High", "Low", "Close", "Volume"]:
+    if col in df.columns:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
 
     if df is None or df.empty:
         return pd.DataFrame()

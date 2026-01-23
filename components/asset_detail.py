@@ -3,15 +3,8 @@ import plotly.graph_objects as go
 import pandas as pd
 import numpy as np
 
-def fake_chart(symbol: str, n=120):
-    np.random.seed(abs(hash(symbol)) % (2**32))
-    price = 100 + np.cumsum(np.random.randn(n) * 0.2)
-    openp = price + np.random.randn(n) * 0.05
-    close = price + np.random.randn(n) * 0.05
-    high = np.maximum(openp, close) + np.random.rand(n) * 0.15
-    low = np.minimum(openp, close) - np.random.rand(n) * 0.15
-    idx = pd.date_range(end=pd.Timestamp.utcnow(), periods=n, freq="15min")
-    return pd.DataFrame({"open": openp, "high": high, "low": low, "close": close}, index=idx)
+from data.live_data import fetch_ohlc
+
 
 def render_asset_detail(profile, decision):
     st.markdown(f"## {profile.display}")
@@ -25,7 +18,14 @@ def render_asset_detail(profile, decision):
 
     st.divider()
 
-    df = fake_chart(profile.symbol)
+    df = fetch_ohlc(profile.symbol, interval="15m", period="5d")
+
+if df is None or df.empty or len(df) < 5:
+    st.warning("Live chart data unavailable for this symbol right now.")
+    if st.button("⬅ Back to dashboard"):
+        st.session_state.selected_symbol = None
+    return
+
     fig = go.Figure(data=[go.Candlestick(
         x=df.index, open=df["open"], high=df["high"], low=df["low"], close=df["close"]
     )])

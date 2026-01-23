@@ -8,7 +8,7 @@ def render_asset_detail(profile, decision):
 
     if st.button("⬅ Back to dashboard"):
         st.session_state.selected_symbol = None
-        st.experimental_rerun()
+       st.rerun()
 
     st.markdown(f"## {profile.display}")
     st.caption(f"Symbol: {profile.symbol} • {profile.asset_class} • Volatility: {profile.volatility}")

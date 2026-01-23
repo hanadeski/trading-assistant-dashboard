@@ -77,12 +77,18 @@ def render_asset_detail(profile, decision):
 
     st.divider()
 
+        # ---------------------------
+    # Live data
+    # ---------------------------
     df = fetch_ohlc(profile.symbol, interval="15m", period="5d")
 
     if df is None or df.empty or len(df) < 5:
         st.warning("Live chart data unavailable for this symbol right now.")
         return
 
+    # ---------------------------
+    # Base chart
+    # ---------------------------
     fig = go.Figure(
         data=[
             go.Candlestick(
@@ -94,39 +100,52 @@ def render_asset_detail(profile, decision):
             )
         ]
     )
-# --- FVG overlays (recent only) ---
-fvgs = pick_recent_fvgs(detect_fvgs(df, lookback=160), max_show=3)
-last_price = float(df["close"].iloc[-1])
-near_fvg = False
 
-for z in fvgs:
-    x0 = z["start"]
-    x1 = df.index[-1]
-    y0 = min(z["top"], z["bottom"])
-    y1 = max(z["top"], z["bottom"])
+    # ---------------------------
+    # FVG overlays (recent only)
+    # ---------------------------
+    fvgs = pick_recent_fvgs(detect_fvgs(df, lookback=160), max_show=3)
+    last_price = float(df["close"].iloc[-1])
+    near_fvg = False
 
-    fig.add_shape(
-        type="rect",
-        x0=x0,
-        x1=x1,
-        y0=y0,
-        y1=y1,
-        line=dict(width=1),
-        fillcolor="rgba(0, 255, 0, 0.10)" if z["type"] == "bull" else "rgba(255, 0, 0, 0.10)",
-        layer="below",
-    )
+    for z in fvgs:
+        x0 = z["start"]
+        x1 = df.index[-1]
+        y0 = min(z["top"], z["bottom"])
+        y1 = max(z["top"], z["bottom"])
 
-    if price_in_zone(last_price, z["top"], z["bottom"], pad=(last_price * 0.0003)):
-        near_fvg = True
+        fig.add_shape(
+            type="rect",
+            x0=x0,
+            x1=x1,
+            y0=y0,
+            y1=y1,
+            line=dict(width=1),
+            fillcolor="rgba(0, 255, 0, 0.10)" if z["type"] == "bull" else "rgba(255, 0, 0, 0.10)",
+            layer="below",
+        )
 
-if fvgs:
-    st.caption(f"FVGs shown: {len(fvgs)} (most recent).")
+        if price_in_zone(last_price, z["top"], z["bottom"], pad=(last_price * 0.0003)):
+            near_fvg = True
 
+    if fvgs:
+        st.caption(f"FVGs shown: {len(fvgs)} (most recent).")
+
+    # ---------------------------
+    # Render chart
+    # ---------------------------
     fig.update_layout(height=420, margin=dict(l=10, r=10, t=30, b=10))
     st.plotly_chart(fig, use_container_width=True)
-if near_fvg:
-    st.info("Price is trading near a Fair Value Gap (FVG). Expect reactions and fakeouts — wait for confirmation.")
 
+    if near_fvg:
+        st.info(
+            "Price is trading near a Fair Value Gap (FVG). "
+            "Expect reactions and fakeouts — wait for confirmation."
+        )
+
+    # ---------------------------
+    # Decision section
+    # ---------------------------
     st.markdown("### Decision")
 
     action = str(decision.action)

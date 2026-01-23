@@ -4,7 +4,9 @@ sys.path.append(str(Path(__file__).parent))
 import streamlit as st
 from engine.profiles import get_profiles
 from engine.decision_layer import run_decisions
+# live data import
 from data.live_data import fetch_ohlc
+
 from components.top_bar import render_top_bar
 from components.asset_table import render_asset_table
 from components.ai_commentary import render_ai_commentary

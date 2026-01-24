@@ -70,6 +70,14 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
     action = "WAIT"
     commentary = "Conditions developing."
     trade_plan: Dict = {}
+    # --- FVG messaging (4.5B) ---
+if fvg_score >= 0.6:
+    commentary += " Strong FVG context nearby—expect volatility; reduce size and wait for clean confirmation."
+elif fvg_score >= 0.3:
+    commentary += " Mild FVG context nearby—expect reaction; be selective on entry."
+
+    
+
 
     if near_fvg:
         commentary += " Price is near a Fair Value Gap (FVG); expect reactions and fakeouts—wait for confirmation."

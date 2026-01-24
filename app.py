@@ -110,33 +110,37 @@ for sym in symbols:
     else:
         rr = 0.0
 
+    # --- Certification ---
     certified = liquidity_ok and structure_ok and rr >= 3.0
-# --- FVG context (4.4B) ---
-fvg_ctx = compute_fvg_context(
-    df,
-    lookback=160,
-    max_show=3,
-    pad_bps=30.0
-)
-near_fvg = bool(fvg_ctx.get("near_fvg", False))
-fvg_score = float(fvg_ctx.get("fvg_score", 0.0))
+
+    # --- FVG context (4.4B) ---
+    fvg_ctx = compute_fvg_context(
+        df,
+        lookback=160,
+        max_show=3,
+        pad_bps=30.0
+    )
+    near_fvg = bool(fvg_ctx.get("near_fvg", False))
+    fvg_score = float(fvg_ctx.get("fvg_score", 0.0))
+
+    # --- Factors payload ---
     factors_by_symbol[sym] = {
-    "bias": bias,
-    "session_boost": 0.5,
-    "structure_ok": structure_ok,
-    "liquidity_ok": liquidity_ok,
-    "certified": certified,
-    "rr": rr,
-    "near_fvg": near_fvg,
-    "fvg_score": fvg_score,
-    "df": df,
-    "news_risk": "none",
-    "volatility_risk": "normal",
-    "entry": round(entry, 5),
-    "stop": round(stop, 5) if isinstance(stop, float) else stop,
-    "tp1": round(tp1, 5) if isinstance(tp1, float) else tp1,
-    "tp2": round(tp2, 5) if isinstance(tp2, float) else tp2,
-}
+        "bias": bias,
+        "session_boost": 0.5,
+        "structure_ok": structure_ok,
+        "liquidity_ok": liquidity_ok,
+        "certified": certified,
+        "rr": rr,
+        "near_fvg": near_fvg,
+        "fvg_score": fvg_score,
+        "df": df,
+        "news_risk": "none",
+        "volatility_risk": "normal",
+        "entry": round(entry, 5),
+        "stop": round(stop, 5) if isinstance(stop, float) else stop,
+        "tp1": round(tp1, 5) if isinstance(tp1, float) else tp1,
+        "tp2": round(tp2, 5) if isinstance(tp2, float) else tp2,
+    }
 
 decisions = run_decisions(profiles, factors_by_symbol)
 decisions_by_symbol = {d.symbol: d for d in decisions}

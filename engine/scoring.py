@@ -78,8 +78,10 @@ if near_fvg:
     action = "WAIT"
     commentary = "Conditions developing."
     trade_plan = {}
+    
 if near_fvg:
     commentary += " Price is near a Fair Value Gap (FVG); expect reactions and fakeouts—wait for confirmation."
+
 
     rr_min = profile.rr_min
     rr_min_cert = profile.certified_rr_min

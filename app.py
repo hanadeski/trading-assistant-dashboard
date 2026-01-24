@@ -57,6 +57,7 @@ for sym in symbols:
             "structure_ok": False,
             "liquidity_ok": False,
             "rr": 0.0,
+            "df": df,
             "news_risk": "none",
             "volatility_risk": "normal",
         }
@@ -132,6 +133,7 @@ except Exception:
     "certified": certified,
     "rr": rr,
     "near_fvg": near_fvg,   # ← 4.3.1 COMPLETE
+    "df": df,
     "news_risk": "none",
     "volatility_risk": "normal",
     "entry": round(entry, 5),

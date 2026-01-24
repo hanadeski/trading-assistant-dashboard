@@ -5,7 +5,7 @@ sys.path.append(str(Path(__file__).parent))
 import streamlit as st
 from engine.profiles import get_profiles
 from engine.decision_layer import run_decisions
-from engine.fvg import detect_fvgs
+from engine.fvg import compute_fvg_context
 
 # live data import
 from data.live_data import fetch_ohlc

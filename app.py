@@ -109,22 +109,15 @@ for sym in symbols:
         rr = 0.0
 
     certified = liquidity_ok and structure_ok and rr >= 3.0
-
-near_fvg = False
-try:
-    fvgs = detect_fvgs(df, lookback=160)
-    last_price = float(df["close"].iloc[-1])
-    pad = last_price * 0.0003  # ~3 bps tolerance
-
-    for z in fvgs[-3:]:  # only most recent FVGs
-        top = max(z["top"], z["bottom"]) + pad
-        bot = min(z["top"], z["bottom"]) - pad
-        if bot <= last_price <= top:
-            near_fvg = True
-            break
-except Exception:
-    near_fvg = False
-
+# --- FVG context (4.4B) ---
+fvg_ctx = compute_fvg_context(
+    df,
+    lookback=160,
+    max_show=3,
+    pad_bps=30.0
+)
+near_fvg = bool(fvg_ctx.get("near_fvg", False))
+fvg_score = float(fvg_ctx.get("fvg_score", 0.0))
     factors_by_symbol[sym] = {
     "bias": bias,
     "session_boost": 0.5,

@@ -23,7 +23,8 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
     rr = float(factors.get("rr", 0.0))
     certified = bool(factors.get("certified", False))
     volatility_risk = factors.get("volatility_risk", "normal")      # normal/high/extreme
-    news_risk = factors.get("news_risk", "none")                    # none/near/aligned/against
+    news_risk = factors.get("news_risk", "none")     # none/near/aligned/against
+    fvg_score = float(factors.get("fvg_score", 0.0))
 
     score = 0.0
     if bias in ("bullish", "bearish"):
@@ -43,36 +44,12 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
         score -= 2.0
     elif news_risk == "near":
         score -= 0.5
-# --- FVG context (optional) ---
-# If factors includes an OHLC dataframe, we can detect nearby FVGs and slightly de-risk
-df = factors.get("df") or factors.get("ohlc")
-near_fvg = False
+        
+# --- soft de-risk adjustment (4.5A) ---
+if fvg_score > 0.0:
+    score -= min(0.6, 0.2 + 0.6 * fvg_score)
 
-if df is not None:
-    try:
-        fvgs = detect_fvgs(df, lookback=160)
-
-        # Support either lowercase columns (open/high/low/close) or Yahoo-style (Close)
-        if "close" in df.columns:
-            last_price = float(df["close"].iloc[-1])
-        else:
-            last_price = float(df["Close"].iloc[-1])
-
-        pad = last_price * 0.0003  # ~3 bps tolerance
-        for z in fvgs[-3:]:  # only check most recent few
-            top = max(z.top, z.bottom) + pad
-            bot = min(z.top, z.bottom) - pad
-            if bot <= last_price <= top:
-                near_fvg = True
-                break
-
-    except Exception:
-        near_fvg = False
-
-if near_fvg:
-    score -= 0.3
-
-    score = clamp(score, 0.0, 10.0)
+score = clamp(score, 0.0, 10.0)
 
     mode = profile.aggression_default
     action = "WAIT"

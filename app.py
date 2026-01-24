@@ -57,6 +57,8 @@ for sym in symbols:
             "structure_ok": False,
             "liquidity_ok": False,
             "rr": 0.0,
+            "near_fvg": False,
+            "fvg_score": 0.0,
             "df": df,
             "news_risk": "none",
             "volatility_risk": "normal",
@@ -125,7 +127,8 @@ fvg_score = float(fvg_ctx.get("fvg_score", 0.0))
     "liquidity_ok": liquidity_ok,
     "certified": certified,
     "rr": rr,
-    "near_fvg": near_fvg,   # ← 4.3.1 COMPLETE
+    "near_fvg": near_fvg,
+    "fvg_score": fvg_score,
     "df": df,
     "news_risk": "none",
     "volatility_risk": "normal",

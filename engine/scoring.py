@@ -77,6 +77,8 @@ elif fvg_score >= 0.3:
     commentary += " Mild FVG context nearby—expect reaction; be selective on entry."
 
     
+# --- FVG gate (4.5C) ---
+fvg_gate = near_fvg and fvg_score >= 0.6
 
 
     if near_fvg:
@@ -112,14 +114,23 @@ elif fvg_score >= 0.3:
     rr_ok = rr >= rr_min or (certified and rr >= rr_min_cert)
 
     if rr_ok and liquidity_ok and structure_ok and bias in ("bullish", "bearish"):
-        action = "BUY NOW" if bias == "bullish" else "SELL NOW"
-        trade_plan = {
-            "entry": factors.get("entry", "TBD"),
-            "stop": factors.get("stop", "TBD"),
-            "tp1": factors.get("tp1", "TBD"),
-            "tp2": factors.get("tp2", "TBD"),
-            "rr": rr,
-        }
-        return Decision(symbol, bias, mode, score, action, "High-confidence setup: conditions align strongly.", trade_plan)
+    if fvg_gate:
+        return Decision(
+            symbol,
+            bias,
+            mode,
+            score,
+            "WAIT",
+            "Setup looks strong, but FVG context is strong—wait for cleaner confirmation/entry.",
+            {}
+        )
 
-    return Decision(symbol, bias, mode, score, "WAIT", "Near-certified, but missing RR/liquidity/structure to trigger.", {})
+    action = "BUY NOW" if bias == "bullish" else "SELL NOW"
+    trade_plan = {
+        "entry": factors.get("entry", "TBD"),
+        "stop": factors.get("stop", "TBD"),
+        "tp1": factors.get("tp1", "TBD"),
+        "tp2": factors.get("tp2", "TBD"),
+        "rr": rr,
+    }
+    return Decision(symbol, bias, mode, score, action, "High-confidence setup: conditions align strongly.", trade_plan)

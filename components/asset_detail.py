@@ -58,7 +58,8 @@ def price_in_zone(price, zone_top, zone_bottom, pad=0.0):
     bottom = min(zone_top, zone_bottom) - pad
     return bottom <= price <= top
 
-def render_asset_detail(profile, decision):
+def render_asset_detail(profile, decision, factors=None):
+    factors = factors or {}
 
     if st.button("⬅ Back to dashboard"):
         st.session_state.selected_symbol = None
@@ -69,11 +70,18 @@ def render_asset_detail(profile, decision):
         f"Symbol: {profile.symbol} • {profile.asset_class} • Volatility: {profile.volatility}"
     )
 
-    c1, c2, c3, c4 = st.columns([1, 1, 1, 1])
-    c1.metric("Bias", str(decision.bias).capitalize())
-    c2.metric("Mode", str(decision.mode).capitalize())
-    c3.metric("Confidence", f"{float(decision.confidence):.1f}/10")
-    c4.metric("Action", str(decision.action))
+    c1, c2, c3, c4, c5 = st.columns((1, 1, 1, 1, 1))
+c1.metric("Bias", str(decision.bias).capitalize())
+c2.metric("Mode", str(decision.mode).capitalize())
+c3.metric("Confidence", f"{float(decision.confidence):.1f}/10")
+c4.metric("Action", str(decision.action))
+
+fvg_score = float(factors.get("fvg_score", 0.0))
+near_fvg = bool(factors.get("near_fvg", False))
+
+c5.metric("FVG Score", f"{fvg_score:.2f}")
+st.caption(f"Near FVG: {'✅ Yes' if near_fvg else '— No'}")
+
 
     st.divider()
 

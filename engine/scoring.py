@@ -62,9 +62,7 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
         score -= min(0.6, 0.2 + 0.6 * fvg_score)
 
     score = clamp(score, 0.0, 10.0)
-    # TEMP DEBUG (remove later)
-    commentary += f" [debug: fvg_score={fvg_score:.2f}]"
-
+    
     # -----------------------
     # Decision defaults
     # -----------------------

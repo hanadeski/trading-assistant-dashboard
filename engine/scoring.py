@@ -56,20 +56,20 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
         score -= 0.5
 
     # -----------------------
-    # Soft de-risk (4.5A)
-    # -----------------------
-    if fvg_score > 0.0:
-        score -= min(0.6, 0.2 + 0.6 * fvg_score)
+# --- soft de-risk adjustment (4.5A) ---
+If fvg_score > 0.0:
+    score -= min(0.6, 0.2 + 0.6 * fvg_score)
 
-    score = clamp(score, 0.0, 10.0)
-    
-    # -----------------------
-    # Decision defaults
-    # -----------------------
-    mode = profile.aggression_default
-    action = "WAIT"
-    commentary = "Conditions developing."
-    trade_plan: Dict = {}
+score = clamp(score, 0.0, 10.0)
+
+# -------------------------
+# Decision defaults
+# -------------------------
+mode = profile.aggression_default
+action = "WAIT"
+commentary = "Conditions developing."
+trade_plan = {}
+
     # --- FVG messaging (4.5B) ---
 if fvg_score >= 0.6:
     commentary += " Strong FVG context nearby—expect volatility; reduce size and wait for clean confirmation."

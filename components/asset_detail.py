@@ -88,7 +88,7 @@ st.divider()
         # ---------------------------
     # Live data
     # ---------------------------
-    df = fetch_ohlc(profile.symbol, interval="15m", period="5d")
+df = fetch_ohlc(profile.symbol, interval="15m", period="5d")
 
     if df is None or df.empty or len(df) < 5:
         st.warning("Live chart data unavailable for this symbol right now.")

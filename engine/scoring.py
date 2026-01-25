@@ -28,10 +28,11 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
     # FVG context
     near_fvg = bool(factors.get("near_fvg", False))
     fvg_score = float(factors.get("fvg_score", 0.0))
+    fvg_gate = near_fvg and (fvg_score >= 0.6)
 
-    # -----------------------
+    # ------------------------
     # Base scoring
-    # -----------------------
+    # ------------------------
     score = 0.0
     if bias in ("bullish", "bearish"):
         score += 2.0
@@ -42,9 +43,9 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
     score += 2.0 * session_boost
     score += clamp((rr - 1.0), 0.0, 2.0)
 
-    # -----------------------
+    # ------------------------
     # Risk penalties
-    # -----------------------
+    # ------------------------
     if volatility_risk == "high":
         score -= 0.5
     elif volatility_risk == "extreme":
@@ -55,48 +56,41 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
     elif news_risk == "near":
         score -= 0.5
 
-    # -----------------------
-# --- soft de-risk adjustment (4.5A) ---
-if fvg_score > 0.0:
-    score -= min(0.6, 0.2 + 0.6 * fvg_score)
+    # --- soft de-risk adjustment (4.5A) ---
+    if fvg_score > 0.0:
+        score -= min(0.6, 0.2 + 0.6 * fvg_score)
 
-score = clamp(score, 0.0, 10.0)
+    score = clamp(score, 0.0, 10.0)
 
-# -------------------------
-# Decision defaults
-# -------------------------
-mode = profile.aggression_default
-action = "WAIT"
-commentary = "Conditions developing."
-trade_plan = {}
+    # ------------------------
+    # Decision defaults
+    # ------------------------
+    mode = profile.aggression_default
+    action = "WAIT"
+    commentary = "Conditions developing."
+    trade_plan: Dict = {}
 
     # --- FVG messaging (4.5B) ---
-if fvg_score >= 0.6:
-    commentary += " Strong FVG context nearby—expect volatility; reduce size and wait for clean confirmation."
-elif fvg_score >= 0.3:
-    commentary += " Mild FVG context nearby—expect reaction; be selective on entry."
+    if fvg_score >= 0.6:
+        commentary += " Strong FVG context nearby—expect volatility; reduce size and wait for clean confirmation."
+    elif fvg_score >= 0.3:
+        commentary += " Mild FVG context nearby—expect reaction; be selective on entry."
 
-    
-# --- FVG gate (4.5C) ---
-fvg_gate = near_fvg and fvg_score >= 0.6
-
-
-if near_fvg:
+    if near_fvg:
         commentary += " Price is near a Fair Value Gap (FVG); expect reactions and fakeouts—wait for confirmation."
 
     rr_min = profile.rr_min
     rr_min_cert = profile.certified_rr_min
 
+    # ------------------------
     # Hard stand-down conditions
+    # ------------------------
     if news_risk == "against" or volatility_risk == "extreme":
-        return Decision(
-            symbol, bias, "standby", score,
-            "DO NOTHING",
-            "Stand down: risk environment is unfavourable.",
-            {}
-        )
+        return Decision(symbol, bias, "standby", score, "DO NOTHING", "Stand down: risk environment is unfavourable.", {})
 
+    # ------------------------
     # Decision ladder
+    # ------------------------
     if score < 5.0:
         return Decision(symbol, bias, "standby", score, "DO NOTHING", "No edge: choppy or mid-range conditions.", {})
 
@@ -114,23 +108,25 @@ if near_fvg:
     rr_ok = rr >= rr_min or (certified and rr >= rr_min_cert)
 
     if rr_ok and liquidity_ok and structure_ok and bias in ("bullish", "bearish"):
-    if fvg_gate:
-        return Decision(
-            symbol,
-            bias,
-            mode,
-            score,
-            "WAIT",
-            "Setup looks strong, but FVG context is strong—wait for cleaner confirmation/entry.",
-            {}
-        )
+        if fvg_gate:
+            return Decision(
+                symbol,
+                bias,
+                mode,
+                score,
+                "WAIT",
+                "Setup looks strong, but FVG context is strong—wait for cleaner confirmation/entry.",
+                {}
+            )
 
-    action = "BUY NOW" if bias == "bullish" else "SELL NOW"
-    trade_plan = {
-        "entry": factors.get("entry", "TBD"),
-        "stop": factors.get("stop", "TBD"),
-        "tp1": factors.get("tp1", "TBD"),
-        "tp2": factors.get("tp2", "TBD"),
-        "rr": rr,
-    }
-    return Decision(symbol, bias, mode, score, action, "High-confidence setup: conditions align strongly.", trade_plan)
+        action = "BUY NOW" if bias == "bullish" else "SELL NOW"
+        trade_plan = {
+            "entry": factors.get("entry", "TBD"),
+            "stop": factors.get("stop", "TBD"),
+            "tp1": factors.get("tp1", "TBD"),
+            "tp2": factors.get("tp2", "TBD"),
+            "rr": rr,
+        }
+        return Decision(symbol, bias, mode, score, action, "High-confidence setup: conditions align strongly.", trade_plan)
+
+    return Decision(symbol, bias, mode, score, "WAIT", "Near-certified, but missing RR/liquidity/structure to trigger.", {})

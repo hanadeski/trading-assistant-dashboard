@@ -83,7 +83,7 @@ c5.metric("FVG Score", f"{fvg_score:.2f}")
 st.caption(f"Near FVG: {'✅ Yes' if near_fvg else '— No'}")
 
 
-    st.divider()
+st.divider()
 
         # ---------------------------
     # Live data

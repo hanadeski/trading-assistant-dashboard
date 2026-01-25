@@ -83,16 +83,15 @@ c5.metric("FVG Score", f"{fvg_score:.2f}")
 st.caption(f"Near FVG: {'✅ Yes' if near_fvg else '— No'}")
 
 
-st.divider()
+    st.divider()
 
-        # ---------------------------
-    # Live data
-    # ---------------------------
-df = fetch_ohlc(profile.symbol, interval="15m", period="5d")
+    df = fetch_ohlc(profile.symbol, interval="15m", period="5d")
 
     if df is None or df.empty or len(df) < 5:
         st.warning("Live chart data unavailable for this symbol right now.")
         return
+
+
 
     # ---------------------------
     # Base chart

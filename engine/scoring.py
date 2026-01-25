@@ -57,7 +57,7 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
 
     # -----------------------
 # --- soft de-risk adjustment (4.5A) ---
-If fvg_score > 0.0:
+if fvg_score > 0.0:
     score -= min(0.6, 0.2 + 0.6 * fvg_score)
 
 score = clamp(score, 0.0, 10.0)

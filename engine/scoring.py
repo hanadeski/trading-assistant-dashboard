@@ -81,7 +81,7 @@ elif fvg_score >= 0.3:
 fvg_gate = near_fvg and fvg_score >= 0.6
 
 
-    if near_fvg:
+if near_fvg:
         commentary += " Price is near a Fair Value Gap (FVG); expect reactions and fakeouts—wait for confirmation."
 
     rr_min = profile.rr_min

@@ -50,20 +50,26 @@ def atr(df, n=14):
 for sym in symbols:
     df = fetch_ohlc(sym, interval="15m", period="5d")
 
-    if df.empty or len(df) < 60:
+    if df is None or df.empty or len(df) < 60:
         factors_by_symbol[sym] = {
             "bias": "neutral",
-            "session_boost": 0.2,
+            "session_boost": 0.0,
             "structure_ok": False,
             "liquidity_ok": False,
             "rr": 0.0,
+            "certified": False,
             "near_fvg": False,
             "fvg_score": 0.0,
             "df": df,
             "news_risk": "none",
             "volatility_risk": "normal",
+            "entry": "TBD",
+            "stop": "TBD",
+            "tp1": "TBD",
+            "tp2": "TBD",
         }
         continue
+
 
     c = df["close"]
     ema_fast = ema(c, 20)

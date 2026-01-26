@@ -158,15 +158,21 @@ for d in decisions:
 render_top_bar(news_flag="Live prices (v1)")
 
 selected = st.session_state.selected_symbol
+
 if selected:
     pmap = {p.symbol: p for p in profiles}
-   render_asset_detail(pmap[selected], decisions_by_symbol[selected], factors=factors_by_symbol.get(selected, {}))
-
+    render_asset_detail(
+        pmap[selected],
+        decisions_by_symbol[selected],
+        factors=factors_by_symbol.get(selected, {})
+    )
 else:
     left, right = st.columns([0.7, 0.3], gap="large")
     with left:
         render_asset_table(decisions, profiles)
     with right:
+        render_ai_commentary()
+
         top = sorted(decisions, key=lambda d: d.confidence, reverse=True)
         render_ai_commentary(top[0] if top else None)
 

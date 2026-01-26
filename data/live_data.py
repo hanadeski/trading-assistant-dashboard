@@ -37,7 +37,6 @@ def fetch_ohlc(symbol: str, interval: str = "15m", period: str = "5d") -> pd.Dat
 
     # Try primary ticker first, then sensible fallbacks
     tickers_to_try = [yf_ticker]
-
     if symbol == "XAUUSD":
         tickers_to_try = ["XAUUSD=X", "GC=F"]
     elif symbol == "XAGUSD":
@@ -63,8 +62,8 @@ def fetch_ohlc(symbol: str, interval: str = "15m", period: str = "5d") -> pd.Dat
     if df is None or df.empty:
         return pd.DataFrame()
 
-    # Store which ticker actually worked
-    df.attrs["used_ticker"] = used_ticker
+    # Store which ticker actually worked (so UI can show it)
+    df.attrs["used_ticker"] = used_ticker or yf_ticker
 
     # Flatten MultiIndex columns if present
     if hasattr(df.columns, "levels"):
@@ -85,5 +84,7 @@ def fetch_ohlc(symbol: str, interval: str = "15m", period: str = "5d") -> pd.Dat
         }
     )
 
-    df = df[["open", "high", "low", "close", "volume"]].dropna()
+    keep = [c for c in ["open", "high", "low", "close", "volume"] if c in df.columns]
+    df = df[keep].dropna()
+
     return df

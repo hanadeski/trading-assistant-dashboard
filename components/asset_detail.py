@@ -87,6 +87,7 @@ def render_asset_detail(profile, decision, factors=None):
     used_ticker = df.attrs.get("used_ticker")
     if used_ticker:
     st.caption(f"Data source: {used_ticker}")
+
     
     st.divider()
     

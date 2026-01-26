@@ -86,7 +86,8 @@ def render_asset_detail(profile, decision, factors=None):
     df = fetch_ohlc(profile.symbol, interval="15m", period="5d")
     used_ticker = df.attrs.get("used_ticker")
     if used_ticker:
-    st.caption(f"Data source: {used_ticker}")
+        st.caption(f"Data source: {used_ticker}")
+
 
     
     st.divider()

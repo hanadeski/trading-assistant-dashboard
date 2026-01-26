@@ -33,9 +33,7 @@ YF_MAP = {
 
 @st.cache_data(ttl=300)
 def fetch_ohlc(symbol: str, interval: str = "15m", period: str = "5d") -> pd.DataFrame:
-    yf_ticker = YF_MAP.get(symbol)
-    if not yf_ticker:
-        return pd.DataFrame()
+    yf_ticker = YF_MAP.get(symbol, symbol)
 
     df = yf.download(
         yf_ticker,

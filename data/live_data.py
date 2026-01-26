@@ -35,13 +35,13 @@ YF_MAP = {
 def fetch_ohlc(symbol: str, interval: str = "15m", period: str = "5d") -> pd.DataFrame:
     yf_ticker = YF_MAP.get(symbol, symbol)
 
-        # Try primary ticker first, then sensible fallbacks
+    # Try primary ticker first, then sensible fallbacks
     tickers_to_try = [yf_ticker]
 
-if symbol == "XAUUSD":
-    tickers_to_try += ["GC=F", "XAUUSD=X"]
-elif symbol == "XAGUSD":
-    tickers_to_try += ["SI=F", "XAGUSD=X"]
+    if symbol == "XAUUSD":
+        tickers_to_try += ["GC=F", "XAUUSD=X"]
+    elif symbol == "XAGUSD":
+        tickers_to_try += ["SI=F", "XAGUSD=X"]
 
     df = None
     for t in tickers_to_try:
@@ -80,5 +80,4 @@ elif symbol == "XAGUSD":
     )
 
     df = df[["open", "high", "low", "close", "volume"]].dropna()
-
     return df

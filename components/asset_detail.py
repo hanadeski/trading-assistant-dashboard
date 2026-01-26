@@ -158,23 +158,23 @@ def render_asset_detail(profile, decision, factors=None):
             "Expect reactions and fakeouts — wait for confirmation."
         )
 
-    # --------------------
-    # Decision section
-st.markdown("### Decision")
-
-action = str(decision.action)
-if action in ("BUY NOW", "SELL NOW"):
-    st.success(action)
-elif action in ("WAIT", "WATCH"):
-    st.warning(action)
-else:
-    st.info(action)
-
-if hasattr(decision, "commentary"):
-    st.write(decision.commentary)
-
-# ------------------------
-# Debug (internal)
-# ------------------------
-with st.expander("Debug: factors", expanded=False):
-    st.json(factors)
+        # --------------------
+        # Decision section
+    st.markdown("### Decision")
+    
+    action = str(decision.action)
+    if action in ("BUY NOW", "SELL NOW"):
+        st.success(action)
+    elif action in ("WAIT", "WATCH"):
+        st.warning(action)
+    else:
+        st.info(action)
+    
+    if hasattr(decision, "commentary"):
+        st.write(decision.commentary)
+    
+    # ------------------------
+    # Debug (internal)
+    # ------------------------
+    with st.expander("Debug: factors", expanded=False):
+        st.json(factors)

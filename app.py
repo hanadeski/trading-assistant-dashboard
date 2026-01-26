@@ -160,7 +160,11 @@ render_top_bar(news_flag="Live prices (v1)")
 selected = st.session_state.selected_symbol
 if selected:
     pmap = {p.symbol: p for p in profiles}
-    render_asset_detail(pmap[selected], decisions_by_symbol[selected])
+   render_asset_detail(
+    pmap[selected],
+    decisions_by_symbol[selected],
+    factors=factors_by_symbol.get(selected, {})
+)
 else:
     left, right = st.columns([0.7, 0.3], gap="large")
     with left:

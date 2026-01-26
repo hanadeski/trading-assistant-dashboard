@@ -177,8 +177,6 @@ else:
     with left:
         render_asset_table(decisions, profiles)
     with right:
-        render_ai_commentary()
-
         top = sorted(decisions, key=lambda d: d.confidence, reverse=True)
         render_ai_commentary(top[0] if top else None)
 

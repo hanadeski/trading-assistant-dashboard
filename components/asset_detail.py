@@ -160,16 +160,21 @@ def render_asset_detail(profile, decision, factors=None):
 
     # --------------------
     # Decision section
-    # --------------------
-    st.markdown("### Decision")
+st.markdown("### Decision")
 
-    action = str(decision.action)
-    if action in ("BUY NOW", "SELL NOW"):
-        st.success(action)
-    elif action in ("WAIT", "WATCH"):
-        st.warning(action)
-    else:
-        st.info(action)
+action = str(decision.action)
+if action in ("BUY NOW", "SELL NOW"):
+    st.success(action)
+elif action in ("WAIT", "WATCH"):
+    st.warning(action)
+else:
+    st.info(action)
 
-    if hasattr(decision, "commentary"):
-        st.write(decision.commentary)
+if hasattr(decision, "commentary"):
+    st.write(decision.commentary)
+
+# ------------------------
+# Debug (internal)
+# ------------------------
+with st.expander("Debug: factors", expanded=False):
+    st.json(factors)

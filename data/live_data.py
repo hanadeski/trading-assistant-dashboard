@@ -35,14 +35,27 @@ YF_MAP = {
 def fetch_ohlc(symbol: str, interval: str = "15m", period: str = "5d") -> pd.DataFrame:
     yf_ticker = YF_MAP.get(symbol, symbol)
 
-    df = yf.download(
-        yf_ticker,
-        interval=interval,
-        period=period,
-        progress=False,
-        auto_adjust=False,
-        threads=False,
-    )
+        # Try primary ticker first, then sensible fallbacks
+    tickers_to_try = [yf_ticker]
+
+if symbol == "XAUUSD":
+    tickers_to_try += ["GC=F", "XAUUSD=X"]
+elif symbol == "XAGUSD":
+    tickers_to_try += ["SI=F", "XAGUSD=X"]
+
+    df = None
+    for t in tickers_to_try:
+        tmp = yf.download(
+            t,
+            interval=interval,
+            period=period,
+            progress=False,
+            auto_adjust=False,
+            threads=False,
+        )
+        if tmp is not None and not tmp.empty:
+            df = tmp
+            break
 
     if df is None or df.empty:
         return pd.DataFrame()

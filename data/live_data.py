@@ -39,11 +39,13 @@ def fetch_ohlc(symbol: str, interval: str = "15m", period: str = "5d") -> pd.Dat
     tickers_to_try = [yf_ticker]
 
     if symbol == "XAUUSD":
-        tickers_to_try += ["GC=F", "XAUUSD=X"]
+        tickers_to_try = ["XAUUSD=X", "GC=F"]
     elif symbol == "XAGUSD":
-        tickers_to_try += ["SI=F", "XAGUSD=X"]
+        tickers_to_try = ["XAGUSD=X", "SI=F"]
 
     df = None
+    used_ticker = None
+
     for t in tickers_to_try:
         tmp = yf.download(
             t,
@@ -55,10 +57,14 @@ def fetch_ohlc(symbol: str, interval: str = "15m", period: str = "5d") -> pd.Dat
         )
         if tmp is not None and not tmp.empty:
             df = tmp
+            used_ticker = t
             break
 
     if df is None or df.empty:
         return pd.DataFrame()
+
+    # Store which ticker actually worked
+    df.attrs["used_ticker"] = used_ticker
 
     # Flatten MultiIndex columns if present
     if hasattr(df.columns, "levels"):

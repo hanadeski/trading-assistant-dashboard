@@ -62,7 +62,7 @@ def price_in_zone(price, zone_top, zone_bottom, pad=0.0):
 def render_asset_detail(profile, decision, factors=None):
     factors = factors or {}
 
-    if st.button("⬅ Back to dashboard"):
+    if st.button("← Back to dashboard"):
         st.session_state.selected_symbol = None
         st.rerun()
 
@@ -72,31 +72,31 @@ def render_asset_detail(profile, decision, factors=None):
     )
 
     c1, c2, c3, c4, c5 = st.columns((1, 1, 1, 1, 1))
-c1.metric("Bias", str(decision.bias).capitalize())
-c2.metric("Mode", str(decision.mode).capitalize())
-c3.metric("Confidence", f"{float(decision.confidence):.1f}/10")
-c4.metric("Action", str(decision.action))
+    c1.metric("Bias", str(decision.bias).capitalize())
+    c2.metric("Mode", str(decision.mode).capitalize())
+    c3.metric("Confidence", f"{float(decision.confidence):.1f}/10")
+    c4.metric("Action", str(decision.action))
 
-fvg_score = float(factors.get("fvg_score", 0.0))
-near_fvg = bool(factors.get("near_fvg", False))
+    fvg_score = float(factors.get("fvg_score", 0.0))
+    near_fvg = bool(factors.get("near_fvg", False))
 
-c5.metric("FVG Score", f"{fvg_score:.2f}")
-st.caption(f"Near FVG: {'✅ Yes' if near_fvg else '— No'}")
-
+    c5.metric("FVG Score", f"{fvg_score:.2f}")
+    st.caption(f"Near FVG: {'✅ Yes' if near_fvg else '– No'}")
 
     st.divider()
 
+    # --------------------
+    # Live data
+    # --------------------
     df = fetch_ohlc(profile.symbol, interval="15m", period="5d")
 
     if df is None or df.empty or len(df) < 5:
         st.warning("Live chart data unavailable for this symbol right now.")
         return
 
-
-
-    # ---------------------------
+    # --------------------
     # Base chart
-    # ---------------------------
+    # --------------------
     fig = go.Figure(
         data=[
             go.Candlestick(
@@ -109,9 +109,9 @@ st.caption(f"Near FVG: {'✅ Yes' if near_fvg else '— No'}")
         ]
     )
 
-    # ---------------------------
+    # --------------------
     # FVG overlays (recent only)
-    # ---------------------------
+    # --------------------
     fvgs = pick_recent_fvgs(detect_fvgs(df, lookback=160), max_show=3)
     last_price = float(df["close"].iloc[-1])
     near_fvg = False
@@ -139,21 +139,21 @@ st.caption(f"Near FVG: {'✅ Yes' if near_fvg else '— No'}")
     if fvgs:
         st.caption(f"FVGs shown: {len(fvgs)} (most recent).")
 
-    # ---------------------------
+    # --------------------
     # Render chart
-    # ---------------------------
+    # --------------------
     fig.update_layout(height=420, margin=dict(l=10, r=10, t=30, b=10))
     st.plotly_chart(fig, use_container_width=True)
 
     if near_fvg:
         st.info(
-            "Price is trading near a Fair Value Gap (FVG). "
+            "Price is trading near a Fair Value Gap (FVG).\n"
             "Expect reactions and fakeouts — wait for confirmation."
         )
 
-    # ---------------------------
+    # --------------------
     # Decision section
-    # ---------------------------
+    # --------------------
     st.markdown("### Decision")
 
     action = str(decision.action)

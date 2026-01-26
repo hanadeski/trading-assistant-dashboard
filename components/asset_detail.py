@@ -82,17 +82,18 @@ def render_asset_detail(profile, decision, factors=None):
 
     c5.metric("FVG Score", f"{fvg_score:.2f}")
     st.caption(f"Near FVG: {'✅ Yes' if near_fvg else '– No'}")
-
-    st.divider()
-
-    # --------------------
-    # Live data
-    # --------------------
+    # Fetch live data early so we can show the data source
     df = fetch_ohlc(profile.symbol, interval="15m", period="5d")
     used_ticker = df.attrs.get("used_ticker")
     if used_ticker:
     st.caption(f"Data source: {used_ticker}")
+    
+    st.divider()
+    
 
+    # --------------------
+    # Live data
+    # --------------------
 
     if df is None or df.empty or len(df) < 5:
         st.warning("Live chart data unavailable for this symbol right now.")

@@ -94,39 +94,60 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
     if score < 5.0:
         return Decision(symbol, bias, "standby", score, "DO NOTHING", "No edge: choppy or mid-range conditions.", {})
 
-    if 5.0 <= score < 7.0:
-        return Decision(symbol, bias, "conservative", score, "WATCH", "Watch: bias exists but confirmation is incomplete.", {})
+    # -----------------------------
+# Decision ladder (Balanced)
+# -----------------------------
 
-    if 7.0 <= score < 9.0:
-        mode = "balanced"
-        if rr >= rr_min and liquidity_ok and structure_ok and bias in ("bullish", "bearish"):
-            return Decision(symbol, bias, mode, score, "WAIT", "Good setup forming; wait for a cleaner trigger/entry.", {})
-        return Decision(symbol, bias, mode, score, "WAIT", "Balanced conditions, but missing RR/liquidity/structure.", {})
+# 1) Low score = WATCH
+if score < 7.0:
+    return Decision(symbol, bias, "conservative", score, "WATCH", "Watch: bias exists but confirmation is incomplete.", {})
 
-    # score >= 9: near-certified / certified
-    mode = "aggressive" if certified else "balanced"
-    rr_ok = rr >= rr_min or (certified and rr >= rr_min_cert)
+# 2) Mid score = WAIT (only if structure + RR are decent), else WATCH
+if score < 9.0:
+    # Balanced: require RR + structure for "WAIT"
+    if rr >= rr_min and structure_ok and bias in ("bullish", "bearish"):
+        return Decision(symbol, bias, mode, score, "WAIT", "Good setup forming; wait for a cleaner trigger/entry.", {})
+    return Decision(symbol, bias, mode, score, "WATCH", "Conditions improving, but missing RR/structure to progress.", {})
 
-    if rr_ok and liquidity_ok and structure_ok and bias in ("bullish", "bearish"):
-        if fvg_gate:
-            return Decision(
-                symbol,
-                bias,
-                mode,
-                score,
-                "WAIT",
-                "Setup looks strong, but FVG context is strong—wait for cleaner confirmation/entry.",
-                {}
-            )
+# 3) High score zone (>= 9.0): decide whether we can trigger
+mode = "aggressive" if certified else "balanced"
 
-        action = "BUY NOW" if bias == "bullish" else "SELL NOW"
-        trade_plan = {
-            "entry": factors.get("entry", "TBD"),
-            "stop": factors.get("stop", "TBD"),
-            "tp1": factors.get("tp1", "TBD"),
-            "tp2": factors.get("tp2", "TBD"),
-            "rr": rr,
-        }
-        return Decision(symbol, bias, mode, score, action, "High-confidence setup: conditions align strongly.", trade_plan)
+# RR gate: use rr_min_cert only if certified, else rr_min
+rr_needed = rr_min_cert if certified else rr_min
+rr_ok = rr >= rr_needed
 
-    return Decision(symbol, bias, mode, score, "WAIT", "Near-certified, but missing RR/liquidity/structure to trigger.", {})
+# Balanced trigger:
+# - Must have structure + RR + directional bias
+# - Liquidity is preferred: without it we won't fire BUY/SELL
+# - FVG is a *quality* gate: without strong FVG, we downgrade BUY/SELL -> WAIT
+if rr_ok and structure_ok and bias in ("bullish", "bearish"):
+    if not liquidity_ok:
+        return Decision(
+            symbol, bias, mode, score,
+            "WAIT",
+            "High score, but liquidity not confirmed; wait for cleaner conditions.",
+            {}
+        )
+
+    # Liquidity OK + RR OK + structure OK => eligible to trade
+    # If FVG isn't strong enough, be conservative and WAIT
+    if not fvg_gate:
+        return Decision(
+            symbol, bias, mode, score,
+            "WAIT",
+            "Setup is strong, but FVG context isn’t strong enough; wait for cleaner confirmation/entry.",
+            {}
+        )
+
+    action = "BUY NOW" if bias == "bullish" else "SELL NOW"
+    trade_plan = {
+        "entry": factors.get("entry", "TBD"),
+        "stop": factors.get("stop", "TBD"),
+        "tp1": factors.get("tp1", "TBD"),
+        "tp2": factors.get("tp2", "TBD"),
+        "rr": rr,
+    }
+    return Decision(symbol, bias, mode, score, action, "High-confidence setup: conditions align strongly.", trade_plan)
+
+# 4) Otherwise: near-certified but not triggerable
+return Decision(symbol, bias, mode, score, "WAIT", "Near-certified, but missing RR/structure/liquidity to trigger.", {})

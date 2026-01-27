@@ -24,6 +24,11 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
     certified = bool(factors.get("certified", False))
     volatility_risk = factors.get("volatility_risk", "normal")  # normal/high/extreme
     news_risk = factors.get("news_risk", "none")  # none/near/aligned/against
+    
+    # Hard caps: never trade in hostile regimes
+    if news_risk == "against" or volatility_risk == "extreme":
+        return Decision(symbol, bias, "standby", 0.0, "DO NOTHING", "Stand down: risk regime is hostile.", {})
+
 
     # FVG context
     near_fvg = bool(factors.get("near_fvg", False))
@@ -105,9 +110,10 @@ if score < 7.0:
 # 2) Mid score = WAIT (only if structure + RR are decent), else WATCH
 if score < 9.0:
     # Balanced: require RR + structure for "WAIT"
-    if rr >= rr_min and structure_ok and bias in ("bullish", "bearish"):
-        return Decision(symbol, bias, mode, score, "WAIT", "Good setup forming; wait for a cleaner trigger/entry.", {})
-    return Decision(symbol, bias, mode, score, "WATCH", "Conditions improving, but missing RR/structure to progress.", {})
+    if rr >= rr_min and structure_ok and bias in ("bullish", "bearish") and (liquidity_ok or near_fvg):
+    return Decision(symbol, bias, mode, score, "WAIT", "Good setup forming; wait for a cleaner trigger/entry.", {})
+    return Decision(symbol, bias, mode, score, "WATCH", "Conditions improving, but missing liquidity/structure/RR to progress.", {})
+
 
 # 3) High score zone (>= 9.0): decide whether we can trigger
 mode = "aggressive" if certified else "balanced"
@@ -117,6 +123,45 @@ rr_needed = rr_min_cert if certified else rr_min
 rr_ok = rr >= rr_needed
 
 # Balanced trigger:
+# Must have structure + RR + direction + liquidity to trade
+# If volatility is high, we cap at WAIT (even if everything else is good)
+if rr_ok and structure_ok and bias in ("bullish", "bearish"):
+
+    if volatility_risk == "high":
+        return Decision(
+            symbol, bias, mode, score,
+            "WAIT",
+            "Volatility is high: wait for cleaner conditions / confirmation.",
+            {}
+        )
+
+    if not liquidity_ok:
+        return Decision(
+            symbol, bias, mode, score,
+            "WAIT",
+            "High score, but liquidity not confirmed; wait for cleaner conditions.",
+            {}
+        )
+
+    # FVG is a quality gate: without strong FVG we downgrade BUY/SELL -> WAIT
+    if not fvg_gate:
+        return Decision(
+            symbol, bias, mode, score,
+            "WAIT",
+            "Setup is strong, but FVG context isn’t strong enough; wait for cleaner confirmation/entry.",
+            {}
+        )
+
+    action = "BUY NOW" if bias == "bullish" else "SELL NOW"
+    trade_plan = {
+        "entry": factors.get("entry", "TBD"),
+        "stop": factors.get("stop", "TBD"),
+        "tp1": factors.get("tp1", "TBD"),
+        "tp2": factors.get("tp2", "TBD"),
+        "rr": rr,
+    }
+    return Decision(symbol, bias, mode, score, action, "High-confidence setup: conditions align strongly.", trade_plan)
+
 # - Must have structure + RR + directional bias
 # - Liquidity is preferred: without it we won't fire BUY/SELL
 # - FVG is a *quality* gate: without strong FVG, we downgrade BUY/SELL -> WAIT

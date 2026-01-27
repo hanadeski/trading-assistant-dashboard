@@ -90,7 +90,7 @@ for sym in symbols:
     # Liquidity OK (v1 proxy): range expansion
     last_range = (df["high"].iloc[-1] - df["low"].iloc[-1])
     avg_range = (df["high"] - df["low"]).rolling(20).mean().iloc[-1]
-    liquidity_ok = last_range > avg_range * 1.2
+    liquidity_ok = last_range > avg_range * 1.1
 
     # ATR-based plan scaffold
     a = atr(df).iloc[-1]

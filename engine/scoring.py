@@ -27,7 +27,7 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
     
     # Hard caps: never trade in hostile regimes
     if news_risk == "against" or volatility_risk == "extreme":
-        return Decision(symbol, bias, "standby", 0.0, "DO NOTHING", "Stand down: risk regime is hostile.", {})
+    return Decision(symbol, bias, "standby", 0.0, "DO NOTHING", "Stand down: risk regime is hostile.", {})
 
 
     # FVG context

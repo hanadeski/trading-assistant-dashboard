@@ -85,18 +85,35 @@ for sym in symbols:
 
     # Structure OK (v1 proxy)
     slope = (ema_fast.iloc[-1] - ema_fast.iloc[-10])
-    structure_ok = abs(slope) > (c.iloc[-1] * 0.0002)
+    structure_ok = bool(abs(slope) > (c.iloc[-1] * 0.0002))
 
     # Liquidity OK (v1 proxy): range expansion
     last_range = (df["high"].iloc[-1] - df["low"].iloc[-1])
     avg_range = (df["high"] - df["low"]).rolling(20).mean().iloc[-1]
-    liquidity_ok = last_range > avg_range * 1.1
+    liquidity_ok = bool(last_range > avg_range * 1.1)
 
     # ATR-based plan scaffold
     a = atr(df).iloc[-1]
     entry = float(c.iloc[-1])
     if a != a or a == 0:  # NaN check
         a = entry * 0.001
+    # Volatility risk (ATR as % of price)
+    atr_pct = float(a / entry) if entry else 0.0
+    
+    # Slightly stricter on commodities
+    if sym in ("XAUUSD", "XAGUSD"):
+        high_thr = 0.012
+        extreme_thr = 0.020
+    else:
+        high_thr = 0.015
+        extreme_thr = 0.025
+    
+    if atr_pct >= extreme_thr:
+        volatility_risk = "extreme"
+    elif atr_pct >= high_thr:
+        volatility_risk = "high"
+    else:
+        volatility_risk = "normal"
 
     if bias == "bullish":
         stop = entry - 1.2 * a
@@ -112,12 +129,12 @@ for sym in symbols:
     if bias in ("bullish", "bearish"):
         risk = abs(entry - stop)
         reward = abs(tp1 - entry)
-        rr = round((reward / risk) if risk else 0.0, 2)
+        rr = float(round((reward / risk) if risk else 0.0, 2))
     else:
         rr = 0.0
 
     # --- Certification ---
-    certified = liquidity_ok and structure_ok and rr >= 3.0
+    certified = bool(liquidity_ok and structure_ok and rr >= 3.0)
 
     # --- FVG context (4.4B) ---
     fvg_ctx = compute_fvg_context(
@@ -141,7 +158,7 @@ for sym in symbols:
         "fvg_score": fvg_score,
         "df": df,
         "news_risk": "none",
-        "volatility_risk": "normal",
+        "volatility_risk": volatility_risk,
         "entry": round(entry, 5),
         "stop": round(stop, 5) if isinstance(stop, float) else stop,
         "tp1": round(tp1, 5) if isinstance(tp1, float) else tp1,

@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import Dict
+import pandas as pd
 from engine.fvg import detect_fvgs
 
 @dataclass

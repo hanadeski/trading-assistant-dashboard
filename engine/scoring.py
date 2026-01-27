@@ -109,14 +109,30 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
 
 # 1) Low score = WATCH
 if score < 7.0:
-    return Decision(symbol, bias, "conservative", score, "WATCH", "Watch: bias exists but confirmation is incomplete.", {})
+    return Decision(
+        symbol, bias, "conservative", score,
+        "WATCH",
+        "Watch: bias exists but confirmation is incomplete.",
+        {}
+    )
 
 # 2) Mid score = WAIT (only if structure + RR are decent), else WATCH
 if score < 9.0:
     # Balanced: require RR + structure for "WAIT"
-    if rr >= rr_min and structure_ok and bias in ("bullish", "bearish") and (liquidity_ok or near_fvg):
-    return Decision(symbol, bias, mode, score, "WAIT", "Good setup forming; wait for a cleaner trigger/entry.", {})
-    return Decision(symbol, bias, mode, score, "WATCH", "Conditions improving, but missing liquidity/structure/RR to progress.", {})
+    if rr >= rr_min and structure_ok and bias in ("bullish", "bearish"):
+        return Decision(
+            symbol, bias, mode, score,
+            "WAIT",
+            "Good setup forming; wait for a cleaner trigger/entry.",
+            {}
+        )
+
+    return Decision(
+        symbol, bias, mode, score,
+        "WATCH",
+        "Conditions improving, but missing liquidity/structure/RR to progress.",
+        {}
+    )
 
 
 # 3) High score zone (>= 9.0): decide whether we can trigger

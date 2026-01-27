@@ -17,18 +17,22 @@ def clamp(x: float, lo: float, hi: float) -> float:
 
 def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
     bias = factors.get("bias", "neutral")
-    session_boost = float(factors.get("session_boost", 0.0))  # 0..1
+    session_boost = float(factors.get("session_boost", 0.0))
     liquidity_ok = bool(factors.get("liquidity_ok", False))
     structure_ok = bool(factors.get("structure_ok", False))
     rr = float(factors.get("rr", 0.0))
     certified = bool(factors.get("certified", False))
-    volatility_risk = factors.get("volatility_risk", "normal")  # normal/high/extreme
-    news_risk = factors.get("news_risk", "none")  # none/near/aligned/against
-    
+    volatility_risk = factors.get("volatility_risk", "normal")
+    news_risk = factors.get("news_risk", "none")
+
     # Hard caps: never trade in hostile regimes
     if news_risk == "against" or volatility_risk == "extreme":
-    return Decision(symbol, bias, "standby", 0.0, "DO NOTHING", "Stand down: risk regime is hostile.", {})
-
+        return Decision(
+            symbol, bias, "standby", 0.0,
+            "DO NOTHING",
+            "Stand down: risk regime is hostile.",
+            {}
+        )
 
     # FVG context
     near_fvg = bool(factors.get("near_fvg", False))

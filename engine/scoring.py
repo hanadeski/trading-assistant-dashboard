@@ -212,5 +212,4 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
         }
         return Decision(symbol, bias, mode, score, action, "High-confidence setup: conditions align strongly.", trade_plan)
     
-    # 4) Otherwise: near-certified but not triggerable
-    return Decision(symbol, bias, mode, score, "WAIT", "Near-certified, but missing RR/structure/liquidity to trigger.", {})
+    

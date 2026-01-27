@@ -106,22 +106,22 @@ for sym in symbols:
     avg_range = (df["high"] - df["low"]).rolling(20).mean().iloc[-1]
     liquidity_ok = bool(last_range > avg_range * 1.1)
 
-        # --- Volatility risk (ATR as % of price) ---
+    # --- Volatility risk (ATR as % of price) ---
     a = atr(df).iloc[-1]
     a = float(a) if pd.notna(a) else 0.0
     entry = float(c.iloc[-1])
-    
+
     atr_pct = (a / entry) if entry else 0.0
-    
+
     # Default FX thresholds
     high_thr = 0.006       # 0.6%
-    extreme_thr = 0.010   # 1.0%
-    
+    extreme_thr = 0.010    # 1.0%
+
     # Commodities are noisier
     if sym in ("XAUUSD", "XAGUSD", "WTI"):
         high_thr = 0.008
         extreme_thr = 0.012
-    
+
     if atr_pct >= extreme_thr:
         volatility_risk = "extreme"
     elif atr_pct >= high_thr:
@@ -162,22 +162,23 @@ for sym in symbols:
 
     # --- Factors payload ---
     factors_by_symbol[sym] = {
-    "bias": bias,
-    "session_boost": to_native(0.5),
-    "structure_ok": to_native(structure_ok),
-    "liquidity_ok": to_native(liquidity_ok),
-    "certified": to_native(certified),
-    "rr": to_native(rr),
-    "near_fvg": to_native(near_fvg),
-    "fvg_score": to_native(fvg_score),
-    "df": df,
-    "news_risk": "none",
-    "volatility_risk": volatility_risk,
-    "entry": to_native(round(entry, 5)),
-    "stop": to_native(round(stop, 5) if isinstance(stop, float) else stop),
-    "tp1": to_native(round(tp1, 5) if isinstance(tp1, float) else tp1),
-    "tp2": to_native(round(tp2, 5) if isinstance(tp2, float) else tp2),
-}
+        "bias": bias,
+        "session_boost": to_native(0.5),
+        "structure_ok": to_native(structure_ok),
+        "liquidity_ok": to_native(liquidity_ok),
+        "certified": to_native(certified),
+        "rr": to_native(rr),
+        "near_fvg": to_native(near_fvg),
+        "fvg_score": to_native(fvg_score),
+        "df": df,
+        "news_risk": "none",
+        "volatility_risk": volatility_risk,
+        "entry": to_native(round(entry, 5)),
+        "stop": to_native(round(stop, 5) if isinstance(stop, float) else stop),
+        "tp1": to_native(round(tp1, 5) if isinstance(tp1, float) else tp1),
+        "tp2": to_native(round(tp2, 5) if isinstance(tp2, float) else tp2),
+    }
+
 
 decisions = run_decisions(profiles, factors_by_symbol)
 decisions_by_symbol = {d.symbol: d for d in decisions}

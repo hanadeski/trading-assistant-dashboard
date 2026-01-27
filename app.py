@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent))
 import streamlit as st
+import pandas as pd
 from engine.profiles import get_profiles
 from engine.decision_layer import run_decisions
 from engine.fvg import compute_fvg_context

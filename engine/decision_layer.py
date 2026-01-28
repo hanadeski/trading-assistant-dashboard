@@ -47,6 +47,10 @@ def run_decisions(profiles: List, factors_by_symbol: Dict[str, Dict]) -> List[De
             _last_fired_ts[sym] = now
 
         decisions.append(d)
+        
+        if symbol == "XAUUSD":
+            return Decision(symbol, bias, mode, 9.9, "BUY NOW",
+                            "TEST: forcing BUY NOW to verify cooldown", {})
 
     return decisions
 

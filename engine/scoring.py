@@ -74,6 +74,22 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
         score -= min(0.6, 0.2 + 0.6 * fvg_score)
 
     score = clamp(score, 0.0, 10.0)
+    # --- Confidence calibration ---
+    # Ensure scores map cleanly to decision strength
+    if score < 5.0:
+        confidence = score
+    elif score < 7.0:
+        confidence = score * 0.9
+    elif score < 9.0:
+        confidence = score * 0.95
+    else:
+        confidence = min(score, 10.0)
+    # --- Volatility-based confidence cap ---
+    if volatility_risk == "high":
+        confidence = min(confidence, 8.5)
+    elif volatility_risk == "extreme":
+        confidence = min(confidence, 6.0)
+
 
     # ------------------------
     # Decision defaults
@@ -99,7 +115,7 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
         # Decision ladder
         # ------------------------
         if score < 5.0:
-            return Decision(symbol, bias, "standby", score, "DO NOTHING", "No edge: choppy or mid-range conditions.", {})
+            return Decision(symbol, bias, "standby", confidence, "DO NOTHING", "No edge: choppy or mid-range conditions.", {})
     
         # -----------------------------
     # Decision ladder (Balanced)
@@ -108,7 +124,7 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
     # 1) Low score = WATCH
     if score < 7.0:
         return Decision(
-            symbol, bias, "conservative", score,
+            symbol, bias, "conservative", confidence,
             "WATCH",
             "Watch: bias exists but confirmation is incomplete.",
             {}
@@ -119,14 +135,14 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
         # Balanced: require RR + structure for "WAIT"
         if rr >= rr_min and structure_ok and bias in ("bullish", "bearish"):
             return Decision(
-                symbol, bias, mode, score,
+                symbol, bias, mode, confidence,
                 "WAIT",
                 "Good setup forming; wait for a cleaner trigger/entry.",
                 {}
             )
     
         return Decision(
-            symbol, bias, mode, score,
+            symbol, bias, mode, confidence,
             "WATCH",
             "Conditions improving, but missing liquidity/structure/RR to progress.",
             {}
@@ -147,7 +163,7 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
     
         if volatility_risk == "high":
             return Decision(
-                symbol, bias, mode, score,
+                symbol, bias, mode, confidence,
                 "WAIT",
                 "Volatility is high: wait for cleaner conditions / confirmation.",
                 {}
@@ -155,7 +171,7 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
     
         if not liquidity_ok:
             return Decision(
-                symbol, bias, mode, score,
+                symbol, bias, mode, confidence,
                 "WAIT",
                 "High score, but liquidity not confirmed; wait for cleaner conditions.",
                 {}
@@ -164,12 +180,20 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
         # FVG is a quality gate: without strong FVG we downgrade BUY/SELL -> WAIT
         if not fvg_gate:
             return Decision(
-                symbol, bias, mode, score,
+                symbol, bias, mode, confidence,
                 "WAIT",
                 "Setup is strong, but FVG context isn’t strong enough; wait for cleaner confirmation/entry.",
                 {}
             )
-    
+            # --- Final risk throttle ---
+        if confidence < 9.0:
+            return Decision(
+                symbol, bias, mode, confidence,
+                "WAIT",
+                "Setup forming, but confidence below execution threshold.",
+                {}
+            )
+
         action = "BUY NOW" if bias == "bullish" else "SELL NOW"
         trade_plan = {
             "entry": factors.get("entry", "TBD"),
@@ -178,7 +202,7 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
             "tp2": factors.get("tp2", "TBD"),
             "rr": rr,
         }
-        return Decision(symbol, bias, mode, score, action, "High-confidence setup: conditions align strongly.", trade_plan)
+        return Decision(symbol, bias, mode, confidence, action, "High-confidence setup: conditions align strongly.", trade_plan)
     
     # - Must have structure + RR + directional bias
     # - Liquidity is preferred: without it we won't fire BUY/SELL
@@ -186,7 +210,7 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
     if rr_ok and structure_ok and bias in ("bullish", "bearish"):
         if not liquidity_ok:
             return Decision(
-                symbol, bias, mode, score,
+                symbol, bias, mode, confidence,
                 "WAIT",
                 "High score, but liquidity not confirmed; wait for cleaner conditions.",
                 {}
@@ -196,7 +220,7 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
         # If FVG isn't strong enough, be conservative and WAIT
         if not fvg_gate:
             return Decision(
-                symbol, bias, mode, score,
+                symbol, bias, mode, confidence,
                 "WAIT",
                 "Setup is strong, but FVG context isn’t strong enough; wait for cleaner confirmation/entry.",
                 {}
@@ -210,6 +234,6 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
             "tp2": factors.get("tp2", "TBD"),
             "rr": rr,
         }
-        return Decision(symbol, bias, mode, score, action, "High-confidence setup: conditions align strongly.", trade_plan)
+        return Decision(symbol, bias, mode, confidence, action, "High-confidence setup: conditions align strongly.", trade_plan)
     
     

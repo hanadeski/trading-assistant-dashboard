@@ -17,6 +17,7 @@ from components.top_bar import render_top_bar
 from components.asset_table import render_asset_table
 from components.ai_commentary import render_ai_commentary
 from components.asset_detail import render_asset_detail
+from components.portfolio_panel import render_portfolio_panel
 from alerts.telegram import send_telegram_message, format_trade_alert
 from state.session_state import init_session_state, can_send_alert, mark_alert_sent
 
@@ -186,7 +187,7 @@ for sym in symbols:
 decisions = run_decisions(profiles, factors_by_symbol)
 decisions_by_symbol = {d.symbol: d for d in decisions}
 update_portfolio(st.session_state, decisions, factors_by_symbol)
-
+render_portfolio_panel(st.session_state)
 
 # Telegram alerts only on high-confidence BUY/SELL
 for d in decisions:

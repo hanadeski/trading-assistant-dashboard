@@ -24,11 +24,6 @@ def run_decisions(profiles: List, factors_by_symbol: Dict[str, Dict]) -> List[De
         sym = p.symbol
         d = decide_from_factors(sym, p, factors_by_symbol.get(sym, {}))
 
-        # --- TEMP TEST (remove after you verify) ---
-        if sym == "XAUUSD":
-            d = Decision(sym, "bullish", d.mode, 9.9, "BUY NOW",
-                         "TEST: forcing BUY NOW to verify cooldown", {})
-
         proposed_action = d.action  # capture what we were going to do
 
         # --- Step 4A execution gate ---

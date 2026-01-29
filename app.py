@@ -7,6 +7,8 @@ import pandas as pd
 from engine.profiles import get_profiles
 from engine.decision_layer import run_decisions
 from engine.fvg import compute_fvg_context
+from engine.portfolio import init_portfolio_state, update_portfolio
+
 
 # live data import
 from data.live_data import fetch_ohlc
@@ -31,6 +33,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 init_session_state(st.session_state)
+init_portfolio_state(st.session_state)
 
 profiles = get_profiles()
 symbols = [p.symbol for p in profiles]
@@ -182,6 +185,7 @@ for sym in symbols:
 
 decisions = run_decisions(profiles, factors_by_symbol)
 decisions_by_symbol = {d.symbol: d for d in decisions}
+update_portfolio(st.session_state, decisions, factors_by_symbol)
 
 
 # Telegram alerts only on high-confidence BUY/SELL

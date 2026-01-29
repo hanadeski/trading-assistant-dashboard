@@ -3,6 +3,7 @@ from typing import Dict, List
 
 import streamlit as st
 from engine.scoring import decide_from_factors, Decision
+from engine.risk import apply_sizing
 
 COOLDOWN_SECS = 60 * 30  # 30 minutes
 
@@ -22,7 +23,10 @@ def run_decisions(profiles: List, factors_by_symbol: Dict[str, Dict]) -> List[De
 
     for p in profiles:
         sym = p.symbol
-        d = decide_from_factors(sym, p, factors_by_symbol.get(sym, {}))
+        
+        factors = factors_by_symbol.get(sym, {})
+        d = decide_from_factors(sym, p, factors)
+        d = apply_sizing(d, p, factors)
 
         proposed_action = d.action  # capture what we were going to do
 

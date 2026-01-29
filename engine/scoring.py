@@ -1,5 +1,5 @@
-from dataclasses import dataclass
-from typing import Dict, Optional
+from dataclasses import dataclass, field
+from typing import Dict
 import pandas as pd
 from engine.fvg import detect_fvgs
 
@@ -12,10 +12,11 @@ class Decision:
     action: str
     commentary: str
     trade_plan: Dict
+
+    # --- Risk / sizing (Step 5B) ---
     risk_pct: float = 0.0
     size: float = 0.0
-    meta: Optional[Dict] = None
-
+    meta: Dict = field(default_factory=dict)
 
 def clamp(x: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, x))

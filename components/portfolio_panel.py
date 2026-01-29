@@ -19,21 +19,22 @@ def render_portfolio_panel(state):
 
     # --- Open positions ---
     st.markdown("### Open Positions")
-    positions = p.get("positions", {})
+    positions = p.get("open_positions", [])
     if positions:
         rows = []
-        for sym, pos in positions.items():
-            rows.append({
-                "Symbol": sym,
-                "Side": pos.get("side"),
-                "Size": pos.get("size"),
-                "Entry": pos.get("entry"),
-                "Stop": pos.get("stop"),
-                "TP1": pos.get("tp1"),
-                "TP2": pos.get("tp2"),
-                "Opened": pos.get("opened_at"),
-                "Unrealized PnL": pos.get("unrealized_pnl"),
-            })
+        for pos in positions:
+        rows.append({
+        "Symbol": pos.get("symbol"),
+        "Side": pos.get("side"),
+        "Size": pos.get("size"),
+        "Entry": pos.get("entry"),
+        "Stop": pos.get("stop"),
+        "TP1": pos.get("tp1"),
+        "TP2": pos.get("tp2"),
+        "Opened": pos.get("opened_at"),
+        "Unrealized PnL": pos.get("unrealized_pnl"),
+    })
+
         st.dataframe(pd.DataFrame(rows), use_container_width=True)
     else:
         st.caption("No open positions.")

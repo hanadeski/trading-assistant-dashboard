@@ -200,6 +200,7 @@ def update_portfolio(state, decisions: List[Any], factors_by_symbol: Dict[str, D
             continue
 
         factors = factors_by_symbol.get(sym, {})
+        last_price = _last_price_from_factors(factors)
         trade_plan = getattr(d, "trade_plan", {}) or {}
 
         # Normalize fields
@@ -215,14 +216,43 @@ def update_portfolio(state, decisions: List[Any], factors_by_symbol: Dict[str, D
         confidence = _to_float(getattr(d, "confidence", 0.0), default=0.0) or 0.0
 
         existing = _find_open_position(open_positions, sym)
+        
+        # --- Step 8B: open / reverse on new signal ---
+
+        # If we already have a position:
         if existing:
-            # If same direction, ignore (cooldown should prevent spam already)
-            if (existing.get("side") == side):
+            # Reverse if signal flips
+            if existing.get("side") != side:
+                exit_px = float(last_price if last_price is not None else entry if entry is not None else 0.0)
+                _close_position(p, existing, exit_px, "REVERSE")
+                existing = None
+            else:
+                # Same-direction signal while already in position -> ignore
                 continue
-            # Opposite direction: close existing at last price, then allow open
-            last_price = _last_price_from_factors(factors) or entry
-            if last_price is not None:
-                _close_position(p, existing, float(last_price), "REVERSE")
+        
+        # If no position exists, open one (only if we have the basics)
+        if entry is None:
+            entry = last_price
+        
+        # Require numeric entry/stop and a positive size
+        if entry is None or stop is None or size <= 0:
+            continue
+        
+        pos = {
+            "symbol": sym,
+            "side": side,                 # "buy" / "sell"
+            "size": float(size),
+            "entry": float(entry),
+            "stop": float(stop),
+            "tp1": float(tp1) if tp1 is not None else None,
+            "tp2": float(tp2) if tp2 is not None else None,
+            "opened_at": _now_ts(),
+            "confidence": float(confidence),
+            "risk_pct": float(risk_pct),
+            "unrealized_pnl": 0.0,
+        }
+        
+        open_positions.append(pos)
 
         # Open new position (only if we have at least entry and size)
         if entry is None or size <= 0:

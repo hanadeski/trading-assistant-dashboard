@@ -60,29 +60,28 @@ def render_portfolio_panel(state):
     if positions:
         rows = []
         for pos in positions:
-        rows.append({
-        "Symbol": pos.get("symbol"),
-        "Side": pos.get("side"),
-        "Size": pos.get("size"),
-        "Entry": pos.get("entry"),
-        "Stop": pos.get("stop"),
-        "TP1": pos.get("tp1"),
-        "TP2": pos.get("tp2"),
-        "Opened": pos.get("opened_at"),
-        "Unrealized PnL": pos.get("unrealized_pnl"),
-    })
-
+            rows.append({
+                "Symbol": pos.get("symbol"),
+                "Side": pos.get("side"),
+                "Size": pos.get("size"),
+                "Entry": pos.get("entry"),
+                "Stop": pos.get("stop"),
+                "TP1": pos.get("tp1"),
+                "TP2": pos.get("tp2"),
+                "Opened": pos.get("opened_at"),
+                "Unrealized PnL": pos.get("unrealized_pnl"),
+            })
+    
         df_pos = pd.DataFrame(rows)
-
+    
         if "Symbol" in df_pos.columns:
             df_pos = df_pos.sort_values("Symbol")
-
+    
         for col in ["Size", "Entry", "Stop", "TP1", "TP2", "Unrealized PnL"]:
             if col in df_pos.columns:
                 df_pos[col] = pd.to_numeric(df_pos[col], errors="coerce")
-
+    
         st.dataframe(df_pos, use_container_width=True)
-
     else:
         st.caption("No open positions.")
 

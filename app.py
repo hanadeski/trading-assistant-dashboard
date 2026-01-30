@@ -35,6 +35,8 @@ st.markdown("""
 
 init_session_state(st.session_state)
 init_portfolio_state(st.session_state)
+st.session_state.setdefault("portfolio_last_closed_count", 0)
+st.session_state.setdefault("portfolio_last_open_count", 0)
 
 profiles = get_profiles()
 symbols = [p.symbol for p in profiles]
@@ -187,6 +189,42 @@ for sym in symbols:
 decisions = run_decisions(profiles, factors_by_symbol)
 decisions_by_symbol = {d.symbol: d for d in decisions}
 update_portfolio(st.session_state, decisions, factors_by_symbol)
+# --- Step 9: Telegram alerts (Mode 3 = opens + closes, ignore TP1_PARTIAL) ---
+st.session_state.setdefault("portfolio_last_open_count", 0)
+st.session_state.setdefault("portfolio_last_closed_count", 0)
+
+p = st.session_state.get("portfolio", {}) or {}
+opens = p.get("open_positions", []) or []
+closes = p.get("closed_trades", []) or []
+
+# New OPEN alerts (only newly-added rows)
+last_open_n = int(st.session_state.get("portfolio_last_open_count", 0))
+now_open_n = len(opens)
+if now_open_n > last_open_n:
+    for pos in opens[last_open_n:now_open_n]:
+        msg = (
+            f"🟦 OPEN {pos.get('symbol')} | {pos.get('side')} | "
+            f"size={pos.get('size')} entry={pos.get('entry')} stop={pos.get('stop')} "
+            f"tp1={pos.get('tp1')} tp2={pos.get('tp2')} | risk%={pos.get('risk_pct')}"
+        )
+        send_telegram_message(msg)
+st.session_state["portfolio_last_open_count"] = now_open_n
+
+# New CLOSE alerts (ignore TP1_PARTIAL)
+last_close_n = int(st.session_state.get("portfolio_last_closed_count", 0))
+now_close_n = len(closes)
+if now_close_n > last_close_n:
+    for t in closes[last_close_n:now_close_n]:
+        reason = (t.get("reason") or "").upper()
+        if reason == "TP1_PARTIAL":
+            continue
+
+        msg = (
+            f"✅ CLOSE {t.get('symbol')} | {t.get('side')} | "
+            f"exit={t.get('exit')} pnl={t.get('pnl')} | reason={reason}"
+        )
+        send_telegram_message(msg)
+st.session_state["portfolio_last_closed_count"] = now_close_n
 render_portfolio_panel(st.session_state)
 
 # Telegram alerts only on high-confidence BUY/SELL

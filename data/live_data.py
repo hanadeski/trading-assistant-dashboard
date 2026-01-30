@@ -30,17 +30,18 @@ YF_MAP = {
     "US100": "^NDX",
     "US500": "^GSPC",
 }
+# Yahoo symbol fallbacks (robust across regions)
+YF_FALLBACKS = {
+    "XAUUSD": ["XAUUSD=X", "GC=F"],
+    "XAGUSD": ["XAGUSD=X", "SI=F"],
+}
 
 @st.cache_data(ttl=300)
 def fetch_ohlc(symbol: str, interval: str = "15m", period: str = "5d") -> pd.DataFrame:
     yf_ticker = YF_MAP.get(symbol, symbol)
 
-    # Try primary ticker first, then sensible fallbacks
-    tickers_to_try = [yf_ticker]
-    if symbol == "XAUUSD":
-        tickers_to_try = ["XAUUSD=X", "GC=F"]
-    elif symbol == "XAGUSD":
-        tickers_to_try = ["XAGUSD=X", "SI=F"]
+# Primary + fallbacks
+tickers_to_try = YF_FALLBACKS.get(symbol, [yf_ticker])
 
     df = None
     used_ticker = None

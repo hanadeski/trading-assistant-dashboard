@@ -18,8 +18,8 @@ from components.asset_table import render_asset_table
 from components.ai_commentary import render_ai_commentary
 from components.asset_detail import render_asset_detail
 from components.portfolio_panel import render_portfolio_panel
-from alerts.telegram import send_telegram_message, format_trade_alert
-from state.session_state import init_session_state, can_send_alert, mark_alert_sent
+from alerts.telegram import send_telegram_message
+from state.session_state import init_session_state
 
 st.set_page_config(page_title="Trading Assistant", layout="wide", initial_sidebar_state="collapsed")
 
@@ -38,7 +38,12 @@ init_portfolio_state(st.session_state)
 st.session_state.setdefault("portfolio_last_closed_count", 0)
 st.session_state.setdefault("portfolio_last_open_count", 0)
 
-profiles = get_profiles()
+try:
+    profiles = get_profiles()
+except Exception as e:
+    st.error(f"Profiles failed: {e}")
+    profiles = []
+
 symbols = [p.symbol for p in profiles]
 
 # STEP 2/3: live data -> build live factors
@@ -185,56 +190,59 @@ for sym in symbols:
         "tp2": to_native(round(tp2, 5) if isinstance(tp2, float) else tp2),
     }
 
+try:
+    decisions = run_decisions(profiles, factors_by_symbol)
+    decisions_by_symbol = {d.symbol: d for d in decisions}
+    update_portfolio(st.session_state, decisions, factors_by_symbol)
+except Exception as e:
+    st.error(f"Decision/portfolio stage failed: {e}")
+    decisions = []
+    decisions_by_symbol = {}
 
-decisions = run_decisions(profiles, factors_by_symbol)
-decisions_by_symbol = {d.symbol: d for d in decisions}
-update_portfolio(st.session_state, decisions, factors_by_symbol)
 # --- Step 9: Telegram alerts (Mode 3 = opens + closes, ignore TP1_PARTIAL) ---
 st.session_state.setdefault("portfolio_last_open_count", 0)
 st.session_state.setdefault("portfolio_last_closed_count", 0)
 
-p = st.session_state.get("portfolio", {}) or {}
-opens = p.get("open_positions", []) or []
-closes = p.get("closed_trades", []) or []
+try:
+    p = st.session_state.get("portfolio", {}) or {}
+    opens = p.get("open_positions", []) or []
+    closes = p.get("closed_trades", []) or []
 
-# New OPEN alerts (only newly-added rows)
-last_open_n = int(st.session_state.get("portfolio_last_open_count", 0))
-now_open_n = len(opens)
-if now_open_n > last_open_n:
-    for pos in opens[last_open_n:now_open_n]:
-        msg = (
-            f"🟦 OPEN {pos.get('symbol')} | {pos.get('side')} | "
-            f"size={pos.get('size')} entry={pos.get('entry')} stop={pos.get('stop')} "
-            f"tp1={pos.get('tp1')} tp2={pos.get('tp2')} | risk%={pos.get('risk_pct')}"
-        )
-        send_telegram_message(msg)
-st.session_state["portfolio_last_open_count"] = now_open_n
+    # New OPEN alerts (only newly-added rows)
+    last_open_n = int(st.session_state.get("portfolio_last_open_count", 0))
+    now_open_n = len(opens)
+    if now_open_n > last_open_n:
+        for pos in opens[last_open_n:now_open_n]:
+            msg = (
+                f"🟦 OPEN {pos.get('symbol')} | {pos.get('side')} | "
+                f"size={pos.get('size')} entry={pos.get('entry')} stop={pos.get('stop')} "
+                f"tp1={pos.get('tp1')} tp2={pos.get('tp2')} | risk%={pos.get('risk_pct')}"
+            )
+            # only send if Telegram is configured (function should handle this, but we guard anyway)
+            send_telegram_message(msg)
+    st.session_state["portfolio_last_open_count"] = now_open_n
 
-# New CLOSE alerts (ignore TP1_PARTIAL)
-last_close_n = int(st.session_state.get("portfolio_last_closed_count", 0))
-now_close_n = len(closes)
-if now_close_n > last_close_n:
-    for t in closes[last_close_n:now_close_n]:
-        reason = (t.get("reason") or "").upper()
-        if reason == "TP1_PARTIAL":
-            continue
+    # New CLOSE alerts (ignore TP1_PARTIAL)
+    last_close_n = int(st.session_state.get("portfolio_last_closed_count", 0))
+    now_close_n = len(closes)
+    if now_close_n > last_close_n:
+        for t in closes[last_close_n:now_close_n]:
+            reason = (t.get("reason") or "").upper()
+            if reason == "TP1_PARTIAL":
+                continue
 
-        msg = (
-            f"✅ CLOSE {t.get('symbol')} | {t.get('side')} | "
-            f"exit={t.get('exit')} pnl={t.get('pnl')} | reason={reason}"
-        )
-        send_telegram_message(msg)
-st.session_state["portfolio_last_closed_count"] = now_close_n
+            msg = (
+                f"✅ CLOSE {t.get('symbol')} | {t.get('side')} | "
+                f"exit={t.get('exit')} pnl={t.get('pnl')} | reason={reason}"
+            )
+            send_telegram_message(msg)
+    st.session_state["portfolio_last_closed_count"] = now_close_n
+
+except Exception as e:
+    # Don't crash the app if Telegram isn't configured / network fails
+    st.session_state["telegram_error"] = str(e)
+
 render_portfolio_panel(st.session_state)
-
-# Telegram alerts only on high-confidence BUY/SELL
-for d in decisions:
-    if d.confidence >= 9.0 and d.action in ("BUY NOW", "SELL NOW"):
-        if can_send_alert(st.session_state, d.symbol, d.action):
-            msg = format_trade_alert(d)
-            ok = send_telegram_message(msg)
-            mark_alert_sent(st.session_state, d.symbol, d.action)
-            st.session_state[f"telegram_{d.symbol}"] = "sent" if ok else "not_configured"
 
 render_top_bar(news_flag="Live prices (v1)")
 

@@ -17,18 +17,23 @@ def render_portfolio_panel(state):
         st.caption("Reset clears history. Close-all clears open positions (UI-level).")
 
     if reset:
-        starting = float(p.get("starting_equity", 10000.0)) if isinstance(p, dict) else 10000.0
-        state["portfolio"] = {
-            "starting_equity": starting,
-            "equity": starting,
-            "realized_pnl": 0.0,
-            "unrealized_pnl": 0.0,
-            "open_positions": [],
-            "closed_trades": [],
-            "equity_curve": [],
-        }
-        st.success("Portfolio reset.")
-        st.rerun()
+    starting = float(p.get("starting_equity", 10000.0)) if isinstance(p, dict) else 10000.0
+    state["portfolio"] = {
+        "starting_equity": starting,
+        "equity": starting,
+        "realized_pnl": 0.0,
+        "unrealized_pnl": 0.0,
+        "open_positions": [],
+        "closed_trades": [],
+        "equity_curve": [],
+    }
+
+    # reset alert counters
+    state["portfolio_last_open_count"] = 0
+    state["portfolio_last_closed_count"] = 0
+
+    st.success("Portfolio reset.")
+    st.rerun()
 
     if close_all:
         p = state.get("portfolio", {})

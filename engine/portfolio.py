@@ -167,72 +167,78 @@ def update_portfolio(state, decisions: List[Any], factors_by_symbol: Dict[str, D
                 if stop is not None and bar_low <= stop:
                     _close_position(p, pos, stop, "STOP")
                     continue
+
                 if tp1 is not None and bar_high >= tp1 and not pos.get("tp1_hit", False):
-        # Partial take-profit at TP1: close half, move stop to breakeven
-        entry_px = float(pos.get("entry") or 0.0)
-        size_now = float(pos.get("size") or 0.0)
-        if size_now > 0:
-            take_size = size_now * 0.5
-            realized = (tp1 - entry_px) * take_size
+                    # Partial take-profit at TP1: close half, move stop to breakeven
+                    entry_px = float(pos.get("entry") or 0.0)
+                    size_now = float(pos.get("size") or 0.0)
 
-        # record partial trade
-        closed_trades.append({
-            "symbol": pos.get("symbol"),
-            "side": pos.get("side"),
-            "size": take_size,
-            "entry": entry_px,
-            "exit": float(tp1),
-            "pnl": float(realized),
-            "opened_at": pos.get("opened_at"),
-            "closed_at": _now_ts(),
-            "reason": "TP1_PARTIAL",
-        })
+                    if size_now > 0:
+                        take_size = size_now * 0.5
+                        realized = (tp1 - entry_px) * take_size
 
-        p["realized_pnl"] = float(p.get("realized_pnl", 0.0)) + float(realized)
-        pos["size"] = size_now - take_size
-        pos["tp1_hit"] = True
+                        # record partial trade
+                        closed_trades.append({
+                            "symbol": pos.get("symbol"),
+                            "side": pos.get("side"),
+                            "size": take_size,
+                            "entry": entry_px,
+                            "exit": float(tp1),
+                            "pnl": float(realized),
+                            "opened_at": pos.get("opened_at"),
+                            "closed_at": _now_ts(),
+                            "reason": "TP1_PARTIAL",
+                        })
 
-        # Move stop to breakeven (entry)
-        pos["stop"] = entry_px
+                        p["realized_pnl"] = float(p.get("realized_pnl", 0.0)) + float(realized)
+                        pos["size"] = size_now - take_size
+                        pos["tp1_hit"] = True
 
-        # If we accidentally sized to ~0, fully close
-        if float(pos["size"]) <= 0:
-            _close_position(p, pos, float(tp1), "TP1_FULL")
-            continue
+                        # Move stop to breakeven (entry)
+                        pos["stop"] = entry_px
+
+                        # If we accidentally sized to ~0, fully close
+                        if float(pos["size"]) <= 0:
+                            _close_position(p, pos, float(tp1), "TP1_FULL")
+                            continue
+
             elif side == "sell":
                 if stop is not None and bar_high >= stop:
                     _close_position(p, pos, stop, "STOP")
                     continue
+
                 if tp1 is not None and bar_low <= tp1 and not pos.get("tp1_hit", False):
-        # Partial take-profit at TP1: close half, move stop to breakeven
-        entry_px = float(pos.get("entry") or 0.0)
-        size_now = float(pos.get("size") or 0.0)
-        if size_now > 0:
-            take_size = size_now * 0.5
-            realized = (entry_px - tp1) * take_size  # sell pnl
+                    # Partial take-profit at TP1: close half, move stop to breakeven
+                    entry_px = float(pos.get("entry") or 0.0)
+                    size_now = float(pos.get("size") or 0.0)
 
-        closed_trades.append({
-            "symbol": pos.get("symbol"),
-            "side": pos.get("side"),
-            "size": take_size,
-            "entry": entry_px,
-            "exit": float(tp1),
-            "pnl": float(realized),
-            "opened_at": pos.get("opened_at"),
-            "closed_at": _now_ts(),
-            "reason": "TP1_PARTIAL",
-        })
+                    if size_now > 0:
+                        take_size = size_now * 0.5
+                        realized = (entry_px - tp1) * take_size  # sell pnl
 
-        p["realized_pnl"] = float(p.get("realized_pnl", 0.0)) + float(realized)
-        pos["size"] = size_now - take_size
-        pos["tp1_hit"] = True
+                        closed_trades.append({
+                            "symbol": pos.get("symbol"),
+                            "side": pos.get("side"),
+                            "size": take_size,
+                            "entry": entry_px,
+                            "exit": float(tp1),
+                            "pnl": float(realized),
+                            "opened_at": pos.get("opened_at"),
+                            "closed_at": _now_ts(),
+                            "reason": "TP1_PARTIAL",
+                        })
 
-        # Move stop to breakeven (entry)
-        pos["stop"] = entry_px
+                        p["realized_pnl"] = float(p.get("realized_pnl", 0.0)) + float(realized)
+                        pos["size"] = size_now - take_size
+                        pos["tp1_hit"] = True
 
-        if float(pos["size"]) <= 0:
-            _close_position(p, pos, float(tp1), "TP1_FULL")
-            continue
+                        # Move stop to breakeven (entry)
+                        pos["stop"] = entry_px
+
+                        if float(pos["size"]) <= 0:
+                            _close_position(p, pos, float(tp1), "TP1_FULL")
+                            continue
+
 
         # otherwise unrealized
         unreal = _calc_unrealized(pos, last_price)

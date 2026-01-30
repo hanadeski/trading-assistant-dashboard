@@ -3,7 +3,9 @@ import pandas as pd
 
 def render_portfolio_panel(state):
     st.subheader("Portfolio")
-
+        # one-run guard so reset/close doesn't trap the app in reruns
+    if state.get("_did_portfolio_action"):
+        state["_did_portfolio_action"] = False
         # --- Actions ---
     p = state.get("portfolio", {})
 
@@ -33,7 +35,8 @@ def render_portfolio_panel(state):
         state["portfolio_last_closed_count"] = 0
 
     st.success("Portfolio reset.")
-    st.rerun()
+    state["_did_portfolio_action"] = True
+
 
     if close_all:
         p = state.get("portfolio", {})
@@ -41,7 +44,7 @@ def render_portfolio_panel(state):
         p["unrealized_pnl"] = 0.0
         state["portfolio"] = p
         st.success("All positions cleared.")
-        st.rerun()
+        state["_did_portfolio_action"] = True
 
     # --- Portfolio summary ---
     p = state.get("portfolio", {})

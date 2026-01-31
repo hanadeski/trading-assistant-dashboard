@@ -243,30 +243,38 @@ except Exception as e:
     st.session_state["telegram_error"] = str(e)
 
 render_portfolio_panel(st.session_state)
+st.write("✅ DEBUG: after portfolio panel")
 
 render_top_bar(news_flag="Live prices (v1)")
+st.write("✅ DEBUG: after top bar")
+
 
 selected = st.session_state.selected_symbol
 
-if selected:
-    pmap = {p.symbol: p for p in profiles}
+try:
+    if selected:
+        pmap = {p.symbol: p for p in profiles}
 
-    render_asset_detail(
-        pmap[selected],
-        decisions_by_symbol[selected],
-        factors=factors_by_symbol.get(selected, {})
-    )
+        render_asset_detail(
+            pmap[selected],
+            decisions_by_symbol.get(selected),
+            factors=factors_by_symbol.get(selected, {})
+        )
 
-    render_ai_commentary(
-        decisions_by_symbol.get(selected)
-    )
+        render_ai_commentary(
+            decisions_by_symbol.get(selected)
+        )
 
-else:
-    left, right = st.columns([0.7, 0.3], gap="large")
-    with left:
-        render_asset_table(decisions, profiles)
-    with right:
-        top = sorted(decisions, key=lambda d: d.confidence, reverse=True)
-        render_ai_commentary(top[0] if top else None)
+    else:
+        left, right = st.columns([0.7, 0.3], gap="large")
+        with left:
+            render_asset_table(decisions, profiles)
+        with right:
+            top = sorted(decisions, key=lambda d: d.confidence, reverse=True)
+            render_ai_commentary(top[0] if top else None)
+
+except Exception as e:
+    st.error(f"UI render stage failed: {e}")
+    st.exception(e)
 
     st.caption("Step 1 is running with mock data. Next: wire in real EUR/USD + Gold decisions and real charts, then live feeds.")

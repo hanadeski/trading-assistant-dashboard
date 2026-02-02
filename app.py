@@ -37,7 +37,10 @@ init_session_state(st.session_state)
 init_portfolio_state(st.session_state)
 st.session_state.setdefault("portfolio_last_closed_count", 0)
 st.session_state.setdefault("portfolio_last_open_count", 0)
-
+# --- Step 11A: Keep last-known-good market data so the UI never goes blank ---
+st.session_state.setdefault("last_good_ohlc", {})        # dict[symbol] -> pd.DataFrame
+st.session_state.setdefault("ohlc_errors", {})           # dict[symbol] -> str
+st.session_state.setdefault("ohlc_used_fallback", set()) # set of symbols that used fallback this run
 # =========================
 # 10B — Safety / debug toggles
 # =========================
@@ -91,9 +94,22 @@ try:
             pass
         return x
 
+    st.session_state["ohlc_used_fallback"] = set()
     for sym in symbols:
+        # Pull OHLC with fallback to last known good
         try:
             df = fetch_ohlc(sym, interval="15m", period="5d")
+            if df is not None and not df.empty:
+                st.session_state["last_good_ohlc"][sym] = df
+                st.session_state["ohlc_errors"].pop(sym, None)
+            else:
+                raise ValueError("Empty DF")
+        except Exception as e:
+            st.session_state["ohlc_errors"][sym] = str(e)
+            df = st.session_state["last_good_ohlc"].get(sym, pd.DataFrame())
+            if df is not None and not df.empty:
+                st.session_state["ohlc_used_fallback"].add(sym)
+
         except Exception as e:
             fail_soft(f"Live data fetch failed for {sym}", e)
             df = pd.DataFrame()
@@ -271,6 +287,17 @@ try:
     # --- UI render (safe-ish, but outer try already protects) ---
     render_portfolio_panel(st.session_state)
     render_top_bar(news_flag="Live prices (v1)")
+    # --- Step 11B: Data health / status line ---
+    err_map = st.session_state.get("ohlc_errors", {}) or {}
+    fallback_syms = sorted(list(st.session_state.get("ohlc_used_fallback", set()) or set()))
+    
+    if err_map:
+        st.warning(f"Live data issues: {len(err_map)} symbol(s) failed this run. Using fallback for: {', '.join(fallback_syms) if fallback_syms else 'none'}")
+    
+        # Optional: show details collapsed
+        with st.expander("See data error details", expanded=False):
+            for s, msg in err_map.items():
+                st.write(f"• {s}: {msg}")
 
     selected = st.session_state.selected_symbol
 

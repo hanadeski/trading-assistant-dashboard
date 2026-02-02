@@ -20,10 +20,11 @@ YF_MAP = {
     "AUDJPY": "AUDJPY=X",
     "CADJPY": "CADJPY=X",
 
-    # Commodities
-    "XAUUSD": "XAUUSD=X",
-    "XAGUSD": "XAGUSD=X",
+    # Commodities (prefer futures for reliability)
+    "XAUUSD": "GC=F",   # Gold futures
+    "XAGUSD": "SI=F",   # Silver futures
     "WTI": "CL=F",
+
 
     # Indices
     "US30": "^DJI",
@@ -32,10 +33,10 @@ YF_MAP = {
 }
 
 # Fallbacks for symbols that fail regionally
-YF_FALLBACKS = {
-    "XAUUSD": ["XAUUSD=X", "GC=F"],
-    "XAGUSD": ["XAGUSD=X", "SI=F"],
-}
+    YF_FALLBACKS = {
+        "XAUUSD": ["GC=F", "XAUUSD=X"],
+        "XAGUSD": ["SI=F", "XAGUSD=X"],
+    }
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -47,7 +48,12 @@ def fetch_ohlc(symbol: str, interval: str = "15m", period: str = "5d") -> pd.Dat
     yf_ticker = YF_MAP.get(symbol, symbol)
 
     # Try primary + fallbacks
-    tickers_to_try = YF_FALLBACKS.get(symbol, [yf_ticker])
+    tickers_to_try = YF_FALLBACKS.get(symbol)
+    if not tickers_to_try:
+        tickers_to_try = [yf_ticker]
+    elif isinstance(tickers_to_try, str):
+        tickers_to_try = [tickers_to_try]
+
 
     last_err = None
     for t in tickers_to_try:

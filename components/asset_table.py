@@ -16,31 +16,42 @@ def style_action(action: str) -> str:
     return "⚫ DO NOTHING"
 
 def render_asset_table(decisions, profiles):
-    # Guard: no decisions yet → safe UI
+    st.markdown("## Watchlist")
+    st.caption("Click a symbol button to open details. Telegram alerts only fire on high-confidence BUY/SELL.")
+
+    # Hard guard: if decisions is empty, don't build a df that can crash UI
     if not decisions:
-        st.markdown("## Watchlist")
-        st.caption("Waiting for live data / decisions…")
-        st.info("No trade decisions available yet.")
+        st.info("Waiting for live data / decisions…")
         return
 
     prof_map = {p.symbol: p for p in profiles}
-    rows = []
 
+    rows = []
     for d in decisions:
         p = prof_map.get(d.symbol)
         rows.append({
-            "Asset": p.display if p else d.symbol,
+            "Asset": (p.display if p else d.symbol),
             "Symbol": d.symbol,
             "Bias": emoji_bias(d.bias),
-            "Mode": d.mode.capitalize(),
-            "Confidence": f"{d.confidence:.1f}/10",
-            "Action": style_action(d.action),
+            "Mode": (d.mode.capitalize() if getattr(d, "mode", None) else ""),
+            "Confidence": f"{float(getattr(d, 'confidence', 0.0)):.1f}/10",
+            "Action": style_action(getattr(d, "action", "")),
         })
 
-    df = pd.DataFrame(
-        rows,
-        columns=["Asset", "Symbol", "Bias", "Mode", "Confidence", "Action"]
-    )
+    # Force a stable schema no matter what
+    df = pd.DataFrame(rows, columns=["Asset", "Symbol", "Bias", "Mode", "Confidence", "Action"])
+
+    # Quick symbol buttons (safe even if df is weird)
+    symbols = df.get("Symbol", pd.Series(dtype=str)).dropna().astype(str).tolist()
+
+    cols = st.columns(6)
+    for i, sym in enumerate(symbols[:18]):
+        with cols[i % 6]:
+            if st.button(sym, use_container_width=True):
+                st.session_state.selected_symbol = sym
+
+    # Table view
+    st.dataframe(df.drop(columns=["Symbol"]), use_container_width=True, hide_index=True)
 
     st.markdown("## Watchlist")
     st.caption("Click a symbol button to open details. Telegram alerts only fire on high-confidence BUY/SELL.")

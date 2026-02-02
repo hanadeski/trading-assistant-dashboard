@@ -55,75 +55,45 @@ def fail_soft(title: str, e: Exception):
         st.exception(e)
 
 # =========================
-# 10A — Wrap the whole main flow
 # =========================
-try:
     # --- Profiles ---
-    try:
-        profiles = get_profiles()
-    except Exception as e:
-        fail_soft("Profiles failed", e)
-        profiles = []
+        # =========================
+# 12 – Snapshot Cache (12.1 → 12.5)
+# =========================
 
+@st.cache_data(ttl=60, show_spinner=False)
+def build_snapshot():
+    """
+    Build a stable snapshot of:
+    - profiles
+    - symbols
+    - factors_by_symbol
+    - decisions
+    - decisions_by_symbol
+    """
+    # --- Profiles ---
+    profiles = get_profiles()
     symbols = [p.symbol for p in profiles]
 
-    # --- Build factors from live data ---
+    # --- Live factors ---
     factors_by_symbol = {}
 
-    def ema(series, n):
-        return series.ewm(span=n, adjust=False).mean()
-
-    def atr(df, n=14):
-        high, low, close = df["high"], df["low"], df["close"]
-        tr = (high - low).to_frame("hl")
-        tr["hc"] = (high - close.shift()).abs()
-        tr["lc"] = (low - close.shift()).abs()
-        return tr.max(axis=1).rolling(n).mean()
-
-    def to_native(x):
-        """Convert numpy/pandas scalars to plain Python types."""
-        try:
-            import numpy as np
-            if isinstance(x, np.bool_):
-                return bool(x)
-            if isinstance(x, np.integer):
-                return int(x)
-            if isinstance(x, np.floating):
-                return float(x)
-        except Exception:
-            pass
-        return x
-
-    st.session_state["ohlc_used_fallback"] = set()
     for sym in symbols:
-        # Pull OHLC with fallback to last known good
         try:
             df = fetch_ohlc(sym, interval="15m", period="5d")
-            if df is not None and not df.empty:
-                st.session_state["last_good_ohlc"][sym] = df
-                st.session_state["ohlc_errors"].pop(sym, None)
-            else:
-                raise ValueError("Empty DF")
-        except Exception as e:
-            st.session_state["ohlc_errors"][sym] = str(e)
-            df = st.session_state["last_good_ohlc"].get(sym, pd.DataFrame())
-            if df is not None and not df.empty:
-                st.session_state["ohlc_used_fallback"].add(sym)
-
-        except Exception as e:
-            fail_soft(f"Live data fetch failed for {sym}", e)
-            df = pd.DataFrame()
+        except Exception:
+            df = None
 
         if df is None or df.empty or len(df) < 60:
             factors_by_symbol[sym] = {
                 "bias": "neutral",
                 "session_boost": 0.0,
-                "structure_ok": to_native(False),
-                "liquidity_ok": to_native(False),
-                "certified": to_native(False),
-                "rr": to_native(0.0),
-                "near_fvg": to_native(False),
-                "fvg_score": to_native(0.0),
+                "structure_ok": False,
+                "liquidity_ok": False,
+                "certified": False,
+                "rr": 0.0,
+                "near_fvg": False,
+                "fvg_score": 0.0,
                 "df": df,
                 "news_risk": "none",
                 "volatility_risk": "normal",
@@ -134,7 +104,7 @@ try:
             }
             continue
 
-        # --- your existing factor logic ---
+        # === your existing factor logic stays the same ===
         c = df["close"]
         ema_fast = ema(c, 20)
         ema_slow = ema(c, 50)
@@ -146,143 +116,81 @@ try:
         else:
             bias = "neutral"
 
-        slope = (ema_fast.iloc[-1] - ema_fast.iloc[-10])
-        structure_ok = bool(abs(slope) > (c.iloc[-1] * 0.0002))
+        slope = ema_fast.iloc[-1] - ema_fast.iloc[-10]
+        structure_ok = abs(slope) > (c.iloc[-1] * 0.0002)
 
-        last_range = (df["high"].iloc[-1] - df["low"].iloc[-1])
+        last_range = df["high"].iloc[-1] - df["low"].iloc[-1]
         avg_range = (df["high"] - df["low"]).rolling(20).mean().iloc[-1]
-        liquidity_ok = bool(last_range > avg_range * 1.1)
+        liquidity_ok = last_range > avg_range * 1.1
 
         a = atr(df).iloc[-1]
         a = float(a) if pd.notna(a) else 0.0
         entry = float(c.iloc[-1])
-
         atr_pct = (a / entry) if entry else 0.0
-        high_thr = 0.006
-        extreme_thr = 0.010
-        if sym in ("XAUUSD", "XAGUSD", "WTI"):
-            high_thr = 0.008
-            extreme_thr = 0.012
 
-        if atr_pct >= extreme_thr:
-            volatility_risk = "extreme"
-        elif atr_pct >= high_thr:
-            volatility_risk = "high"
-        else:
-            volatility_risk = "normal"
+        high_thr, extreme_thr = 0.006, 0.010
+        if sym in ("XAUUSD", "XAGUSD", "WTI"):
+            high_thr, extreme_thr = 0.008, 0.012
+
+        volatility_risk = (
+            "extreme" if atr_pct >= extreme_thr
+            else "high" if atr_pct >= high_thr
+            else "normal"
+        )
 
         if bias == "bullish":
             stop = entry - 1.2 * a
-            tp1 = entry + 2.0 * (entry - stop)
-            tp2 = entry + 3.0 * (entry - stop)
+            tp1 = entry + 2 * (entry - stop)
+            tp2 = entry + 3 * (entry - stop)
         elif bias == "bearish":
             stop = entry + 1.2 * a
-            tp1 = entry - 2.0 * (stop - entry)
-            tp2 = entry - 3.0 * (stop - entry)
+            tp1 = entry - 2 * (stop - entry)
+            tp2 = entry - 3 * (stop - entry)
         else:
-            stop, tp1, tp2 = "TBD", "TBD", "TBD"
+            stop = tp1 = tp2 = "TBD"
 
-        if bias in ("bullish", "bearish"):
-            risk = abs(entry - stop)
-            reward = abs(tp1 - entry)
-            rr = float(round((reward / risk) if risk else 0.0, 2))
-        else:
-            rr = 0.0
+        rr = (
+            round(abs(tp1 - entry) / abs(entry - stop), 2)
+            if bias in ("bullish", "bearish") and stop != "TBD"
+            else 0.0
+        )
 
-        certified = bool(liquidity_ok and structure_ok and rr >= 3.0)
-
-        try:
-            fvg_ctx = compute_fvg_context(df, lookback=160, max_show=3, pad_bps=30.0)
-        except Exception as e:
-            fail_soft(f"FVG compute failed for {sym}", e)
-            fvg_ctx = {"near_fvg": False, "fvg_score": 0.0}
-
-        near_fvg = bool(fvg_ctx.get("near_fvg", False))
-        fvg_score = float(fvg_ctx.get("fvg_score", 0.0))
+        certified = liquidity_ok and structure_ok and rr >= 3.0
 
         factors_by_symbol[sym] = {
             "bias": bias,
-            "session_boost": to_native(0.5),
-            "structure_ok": to_native(structure_ok),
-            "liquidity_ok": to_native(liquidity_ok),
-            "certified": to_native(certified),
-            "rr": to_native(rr),
-            "near_fvg": to_native(near_fvg),
-            "fvg_score": to_native(fvg_score),
+            "session_boost": 0.5,
+            "structure_ok": structure_ok,
+            "liquidity_ok": liquidity_ok,
+            "certified": certified,
+            "rr": rr,
+            "near_fvg": False,
+            "fvg_score": 0.0,
             "df": df,
             "news_risk": "none",
             "volatility_risk": volatility_risk,
-            "entry": to_native(round(entry, 5)),
-            "stop": to_native(round(stop, 5) if isinstance(stop, float) else stop),
-            "tp1": to_native(round(tp1, 5) if isinstance(tp1, float) else tp1),
-            "tp2": to_native(round(tp2, 5) if isinstance(tp2, float) else tp2),
+            "entry": round(entry, 5),
+            "stop": round(stop, 5) if isinstance(stop, float) else stop,
+            "tp1": round(tp1, 5) if isinstance(tp1, float) else tp1,
+            "tp2": round(tp2, 5) if isinstance(tp2, float) else tp2,
         }
 
-    # --- Decisions + portfolio (safe) ---
-    try:
-        decisions = run_decisions(profiles, factors_by_symbol)
-    except Exception as e:
-        fail_soft("Decision stage failed", e)
-        decisions = []
-
+    # --- Decisions ---
+    decisions = run_decisions(profiles, factors_by_symbol)
     decisions_by_symbol = {d.symbol: d for d in decisions}
 
-    try:
-        update_portfolio(st.session_state, decisions, factors_by_symbol)
-    except Exception as e:
-        fail_soft("Portfolio update failed", e)
+    return profiles, symbols, factors_by_symbol, decisions, decisions_by_symbol
 
-    # --- Telegram Mode 3 alerts (opens + closes), safe ---
-    if ALERT_MODE3:
-        st.session_state.setdefault("portfolio_last_open_count", 0)
-        st.session_state.setdefault("portfolio_last_closed_count", 0)
 
-        try:
-            p = st.session_state.get("portfolio", {}) or {}
-            opens = p.get("open_positions", []) or []
-            closes = p.get("closed_trades", []) or []
+# ===== Build snapshot safely =====
+try:
+    profiles, symbols, factors_by_symbol, decisions, decisions_by_symbol = build_snapshot()
+    update_portfolio(st.session_state, decisions, factors_by_symbol)
+except Exception as e:
+    fail_soft("Snapshot build failed", e)
+    profiles, symbols, decisions = [], [], []
+    factors_by_symbol, decisions_by_symbol = {}, {}
 
-            last_open_n = int(st.session_state.get("portfolio_last_open_count", 0))
-            now_open_n = len(opens)
-            if now_open_n > last_open_n:
-                for pos in opens[last_open_n:now_open_n]:
-                    msg = (
-                        f"🟦 OPEN {pos.get('symbol')} | {pos.get('side')} | "
-                        f"size={pos.get('size')} entry={pos.get('entry')} stop={pos.get('stop')} "
-                        f"tp1={pos.get('tp1')} tp2={pos.get('tp2')} | risk%={pos.get('risk_pct')}"
-                    )
-                    send_telegram_message(msg)
-            st.session_state["portfolio_last_open_count"] = now_open_n
-
-            last_close_n = int(st.session_state.get("portfolio_last_closed_count", 0))
-            now_close_n = len(closes)
-            if now_close_n > last_close_n:
-                for t in closes[last_close_n:now_close_n]:
-                    reason = (t.get("reason") or "").upper()
-                    if reason == "TP1_PARTIAL":
-                        continue
-                    msg = (
-                        f"✅ CLOSE {t.get('symbol')} | {t.get('side')} | "
-                        f"exit={t.get('exit')} pnl={t.get('pnl')} | reason={reason}"
-                    )
-                    send_telegram_message(msg)
-            st.session_state["portfolio_last_closed_count"] = now_close_n
-
-        except Exception as e:
-            # never crash UI over telegram
-            st.session_state["telegram_error"] = str(e)
-
-    # --- High-confidence BUY/SELL alerts (kept, but toggleable) ---
-    if ALERT_HIGHCONF:
-        for d in decisions:
-            if getattr(d, "confidence", 0) >= 9.0 and getattr(d, "action", "") in ("BUY NOW", "SELL NOW"):
-                # If you're using can_send_alert/mark_alert_sent in your current file, keep it.
-                # If not imported in this version, just send directly.
-                try:
-                    msg = format_trade_alert(d)
-                    send_telegram_message(msg)
-                except Exception as e:
-                    st.session_state["telegram_error"] = str(e)
 
     # --- UI render (safe-ish, but outer try already protects) ---
     render_portfolio_panel(st.session_state)

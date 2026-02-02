@@ -38,14 +38,18 @@ YF_FALLBACKS = {
 }
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=300, show_spinner=False)
 def fetch_ohlc(symbol: str, interval: str = "15m", period: str = "5d") -> pd.DataFrame:
+    """
+    Fetch OHLC from Yahoo with robust fallbacks and rate-limit handling.
+    Always returns a DataFrame (possibly empty) with columns: open/high/low/close/volume.
+    """
     yf_ticker = YF_MAP.get(symbol, symbol)
+
+    # Try primary + fallbacks
     tickers_to_try = YF_FALLBACKS.get(symbol, [yf_ticker])
 
-    df = None
-    used_ticker = None
-
+    last_err = None
     for t in tickers_to_try:
         try:
             tmp = yf.download(
@@ -54,43 +58,47 @@ def fetch_ohlc(symbol: str, interval: str = "15m", period: str = "5d") -> pd.Dat
                 period=period,
                 progress=False,
                 threads=False,
+                auto_adjust=False,
             )
-        except Exception:
-            tmp = None
 
-        if tmp is not None and not tmp.empty:
-            df = tmp
-            used_ticker = t
-            break
+            if tmp is None or tmp.empty:
+                last_err = f"No data for {t}"
+                continue
 
-    if df is None or df.empty:
-        return pd.DataFrame()
+            # Flatten MultiIndex if present
+            if hasattr(tmp.columns, "levels"):
+                tmp.columns = [c[0] if isinstance(c, tuple) else c for c in tmp.columns]
 
-    # Flatten columns if needed
-    if hasattr(df.columns, "levels"):
-        df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
+            # Ensure numeric OHLC
+            for col in ["Open", "High", "Low", "Close", "Volume"]:
+                if col in tmp.columns:
+                    tmp[col] = pd.to_numeric(tmp[col], errors="coerce")
 
-    # Ensure numeric
-    for col in ["Open", "High", "Low", "Close", "Volume"]:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
+            tmp = tmp.rename(
+                columns={
+                    "Open": "open",
+                    "High": "high",
+                    "Low": "low",
+                    "Close": "close",
+                    "Volume": "volume",
+                }
+            )
 
-    df = df.rename(
-        columns={
-            "Open": "open",
-            "High": "high",
-            "Low": "low",
-            "Close": "close",
-            "Volume": "volume",
-        }
-    )
+            keep = [c for c in ["open", "high", "low", "close", "volume"] if c in tmp.columns]
+            tmp = tmp[keep].dropna()
 
-    keep = [c for c in ["open", "high", "low", "close", "volume"] if c in df.columns]
-    df = df[keep].dropna()
+            if tmp.empty:
+                last_err = f"Empty after cleanup for {t}"
+                continue
 
-    try:
-        df.attrs["used_ticker"] = used_ticker
-    except Exception:
-        pass
+            # record which ticker worked
+            tmp.attrs["used_ticker"] = t
+            return tmp
 
-    return df
+        except Exception as e:
+            # Soft-fail on rate limits + any yfinance errors
+            last_err = repr(e)
+            continue
+
+    # All failed -> return empty DF (caller will use fallback last_good if you wired that)
+    return pd.DataFrame()

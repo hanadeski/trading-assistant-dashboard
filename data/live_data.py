@@ -4,39 +4,38 @@ import streamlit as st
 
 # Map our internal symbols -> Yahoo tickers
 YF_MAP = {
-    # FX majors
+    # FX Majors
     "EURUSD": "EURUSD=X",
     "GBPUSD": "GBPUSD=X",
-    "USDJPY": "JPY=X",
+    "USDJPY": "JPY=X",       # sometimes "USDJPY=X" works too
     "USDCHF": "CHF=X",
     "AUDUSD": "AUDUSD=X",
     "NZDUSD": "NZDUSD=X",
     "USDCAD": "CAD=X",
 
-    # FX secondary
+    # FX Secondary
     "EURJPY": "EURJPY=X",
     "GBPJPY": "GBPJPY=X",
     "EURGBP": "EURGBP=X",
     "AUDJPY": "AUDJPY=X",
     "CADJPY": "CADJPY=X",
 
-    # Commodities (prefer futures for reliability)
-    "XAUUSD": "GC=F",   # Gold futures
-    "XAGUSD": "SI=F",   # Silver futures
+    # Commodities (prefer futures for reliability on Streamlit Cloud)
+    "XAUUSD": "GC=F",        # Gold futures
+    "XAGUSD": "SI=F",        # Silver futures
     "WTI": "CL=F",
 
-
-    # Indices
+    # Indices (approximations)
     "US30": "^DJI",
     "US100": "^NDX",
     "US500": "^GSPC",
 }
 
-# Fallbacks for symbols that fail regionally
-    YF_FALLBACKS = {
-        "XAUUSD": ["GC=F", "XAUUSD=X"],
-        "XAGUSD": ["SI=F", "XAGUSD=X"],
-    }
+# Fallback tickers (try these if primary fails)
+YF_FALLBACKS = {
+    "XAUUSD": ["GC=F", "XAUUSD=X"],
+    "XAGUSD": ["SI=F", "XAGUSD=X"],
+}
 
 
 @st.cache_data(ttl=300, show_spinner=False)

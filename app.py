@@ -78,6 +78,16 @@ def build_snapshot():
     # --- Live factors ---
     factors_by_symbol = {}
 
+    def ema(series, n):
+        return series.ewm(span=n, adjust=False).mean()
+    
+    def atr(df, n=14):
+        high, low, close = df["high"], df["low"], df["close"]
+        tr = (high - low).to_frame("hl")
+        tr["hc"] = (high - close.shift()).abs()
+        tr["lc"] = (low - close.shift()).abs()
+        return tr.max(axis=1).rolling(n).mean()
+
     for sym in symbols:
         try:
             df = fetch_ohlc(sym, interval="15m", period="5d")

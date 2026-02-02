@@ -16,6 +16,11 @@ def style_action(action: str) -> str:
     return "⚫ DO NOTHING"
 
 def render_asset_table(decisions, profiles):
+    if not decisions:
+    st.markdown("## Watchlist")
+    st.caption("Waiting for live data / decisions…")
+    st.info("No trade decisions available yet.")
+    return
     prof_map = {p.symbol: p for p in profiles}
     rows = []
     for d in decisions:
@@ -28,13 +33,16 @@ def render_asset_table(decisions, profiles):
             "Confidence": f"{d.confidence:.1f}/10",
             "Action": style_action(d.action),
         })
-    df = pd.DataFrame(rows)
+        df = pd.DataFrame(
+        rows,
+        columns=["Asset", "Symbol", "Bias", "Mode", "Confidence", "Action"]
+    )
 
     st.markdown("### Watchlist")
     st.caption("Click a symbol button to open details. Telegram alerts only fire on high-confidence BUY/SELL.")
 
     # Quick symbol buttons
-    symbols = df["Symbol"].tolist()
+    symbols = df.get("Symbol", pd.Series(dtype=str)).tolist()
     cols = st.columns(6)
     for i, sym in enumerate(symbols[:18]):
         with cols[i % 6]:

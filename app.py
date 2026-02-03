@@ -198,27 +198,40 @@ st.write("✅ Reached pre-snapshot UI")
 
 
 
-# ===== Build snapshot safely =====
-try:
+profiles, symbols, decisions = [], [], []
+factors_by_symbol, decisions_by_symbol = {}, {}
+st.divider()
+
+if "snapshot_ready" not in st.session_state:
+    st.session_state.snapshot_ready = False
+
+if st.button("🔄 Build Snapshot"):
     if LIVE_DATA:
-        with st.spinner("Building snapshot (live data)…"):
-            profiles, symbols, factors_by_symbol, decisions, decisions_by_symbol = build_snapshot()
-            update_portfolio(st.session_state, decisions, factors_by_symbol)
-        st.write("✅ Snapshot built")
+        with st.spinner("Building snapshot (live data)..."):
+            try:
+                profiles, symbols, factors_by_symbol, decisions, decisions_by_symbol = build_snapshot()
+                update_portfolio(st.session_state, decisions, factors_by_symbol)
+                st.session_state.profiles = profiles
+                st.session_state.decisions = decisions
+
+                st.session_state.snapshot_ready = True
+                st.success("Snapshot built")
+            except Exception as e:
+                fail_soft("Snapshot build failed", e)
     else:
-        st.warning("Live data is OFF — UI will load without refreshing snapshot.")
-        profiles, symbols, decisions = [], [], []
-        factors_by_symbol, decisions_by_symbol = {}, {}
-except Exception as e:
-    fail_soft("Snapshot build failed", e)
-    profiles, symbols, decisions = [], [], []
-    factors_by_symbol, decisions_by_symbol = {}, {}
+        st.warning("Live data is OFF. Enable it in Safety toggles.")
 
 
-
-    # --- UI render (safe-ish, but outer try already protects) ---
+     # --- UI render (safe-ish, but outer try already protects) ---
     render_portfolio_panel(st.session_state)
     render_top_bar(news_flag="Live prices (v1)")
+    
+    if st.session_state.snapshot_ready:
+        with st.container():
+            render_asset_table(st.session_state.decisions, st.session_state.profiles)
+    else:
+        st.info("Click **Build Snapshot** to load live data.")
+
     # --- Step 11B: Data health / status line ---
     err_map = st.session_state.get("ohlc_errors", {}) or {}
     fallback_syms = sorted(list(st.session_state.get("ohlc_used_fallback", set()) or set()))
@@ -244,7 +257,7 @@ except Exception as e:
     else:
         left, right = st.columns([0.7, 0.3], gap="large")
         with left:
-            render_asset_table(decisions, profiles)
+            render_asset_table(st.session_state.decisions, st.session_state.profiles)
         with right:
             top = sorted(decisions, key=lambda d: d.confidence, reverse=True)
             render_ai_commentary(top[0] if top else None)

@@ -211,60 +211,13 @@ if st.button("🔄 Build Snapshot"):
             try:
                 profiles, symbols, factors_by_symbol, decisions, decisions_by_symbol = build_snapshot()
                 update_portfolio(st.session_state, decisions, factors_by_symbol)
+                
                 st.session_state.profiles = profiles
                 st.session_state.decisions = decisions
+                st.session_state.factors_by_symbol = factors_by_symbol
+                st.session_state.decisions_by_symbol = decisions_by_symbol
 
-                st.session_state.snapshot_ready = True
-                st.success("Snapshot built")
             except Exception as e:
                 fail_soft("Snapshot build failed", e)
     else:
         st.warning("Live data is OFF. Enable it in Safety toggles.")
-
-
-     # --- UI render (safe-ish, but outer try already protects) ---
-    render_portfolio_panel(st.session_state)
-    render_top_bar(news_flag="Live prices (v1)")
-    
-    if st.session_state.snapshot_ready:
-        with st.container():
-            render_asset_table(st.session_state.decisions, st.session_state.profiles)
-    else:
-        st.info("Click **Build Snapshot** to load live data.")
-
-    # --- Step 11B: Data health / status line ---
-    err_map = st.session_state.get("ohlc_errors", {}) or {}
-    fallback_syms = sorted(list(st.session_state.get("ohlc_used_fallback", set()) or set()))
-    
-    if err_map:
-        st.warning(f"Live data issues: {len(err_map)} symbol(s) failed this run. Using fallback for: {', '.join(fallback_syms) if fallback_syms else 'none'}")
-    
-        # Optional: show details collapsed
-        with st.expander("See data error details", expanded=False):
-            for s, msg in err_map.items():
-                st.write(f"• {s}: {msg}")
-
-    selected = st.session_state.selected_symbol
-
-    if selected:
-        pmap = {p.symbol: p for p in profiles}
-        render_asset_detail(
-            pmap[selected],
-            decisions_by_symbol.get(selected),
-            factors=factors_by_symbol.get(selected, {})
-        )
-        render_ai_commentary(decisions_by_symbol.get(selected))
-    else:
-        left, right = st.columns([0.7, 0.3], gap="large")
-        with left:
-            render_asset_table(st.session_state.decisions, st.session_state.profiles)
-        with right:
-            top = sorted(decisions, key=lambda d: d.confidence, reverse=True)
-            render_ai_commentary(top[0] if top else None)
-
-        st.caption("Step 1 is running with mock data. Next: wire in real EUR/USD + Gold decisions and real charts, then live feeds.")
-
-except Exception as e:
-    # Absolute last-resort catch so you never get a blank page again
-    fail_soft("App crashed in main flow", e)
-    st.info("The UI is still running, but a core stage failed. Toggle DEBUG in the sidebar for details.")

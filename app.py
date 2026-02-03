@@ -48,6 +48,7 @@ with st.sidebar.expander("⚙️ Safety toggles", expanded=False):
     DEBUG = st.toggle("DEBUG (show full exceptions)", value=False)
     ALERT_MODE3 = st.toggle("Telegram Mode 3 (opens + closes)", value=True)
     ALERT_HIGHCONF = st.toggle("High-confidence BUY/SELL alerts", value=True)
+    LIVE_DATA = st.toggle("Live data (yfinance)", value=True)
 
 def fail_soft(title: str, e: Exception):
     st.error(f"{title}: {e}")
@@ -191,15 +192,28 @@ def build_snapshot():
 
     return profiles, symbols, factors_by_symbol, decisions, decisions_by_symbol
 
+st.title("Trading Assistant")
+st.caption("Booting… if this takes long, live data may be rate-limited.")
+st.write("✅ Reached pre-snapshot UI")
+
+
 
 # ===== Build snapshot safely =====
 try:
-    profiles, symbols, factors_by_symbol, decisions, decisions_by_symbol = build_snapshot()
-    update_portfolio(st.session_state, decisions, factors_by_symbol)
+    if LIVE_DATA:
+        with st.spinner("Building snapshot (live data)…"):
+            profiles, symbols, factors_by_symbol, decisions, decisions_by_symbol = build_snapshot()
+            update_portfolio(st.session_state, decisions, factors_by_symbol)
+        st.write("✅ Snapshot built")
+    else:
+        st.warning("Live data is OFF — UI will load without refreshing snapshot.")
+        profiles, symbols, decisions = [], [], []
+        factors_by_symbol, decisions_by_symbol = {}, {}
 except Exception as e:
     fail_soft("Snapshot build failed", e)
     profiles, symbols, decisions = [], [], []
     factors_by_symbol, decisions_by_symbol = {}, {}
+
 
 
     # --- UI render (safe-ish, but outer try already protects) ---

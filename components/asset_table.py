@@ -19,7 +19,7 @@ def render_asset_table(decisions, profiles):
     st.markdown("## Watchlist")
     st.caption("Click a symbol button to open details. Telegram alerts only fire on high-confidence BUY/SELL.")
 
-    # Hard guard: if decisions is empty, show message and exit safely
+    # Hard guard: if decisions is empty, don't build a df that can crash UI
     if not decisions:
         st.info("Waiting for live data / decisions…")
         return
@@ -38,15 +38,16 @@ def render_asset_table(decisions, profiles):
             "Action": style_action(getattr(d, "action", "")),
         })
 
-    # Force stable schema
+    # Force a stable schema no matter what
     df = pd.DataFrame(rows, columns=["Asset", "Symbol", "Bias", "Mode", "Confidence", "Action"])
 
-    # Quick symbol buttons (safe)
+    # Quick symbol buttons (safe even if df is weird)
     symbols = df.get("Symbol", pd.Series(dtype=str)).dropna().astype(str).tolist()
 
     cols = st.columns(6)
     for i, sym in enumerate(symbols[:18]):
         with cols[i % 6]:
+            # Optional: explicit key makes it extra safe
             if st.button(sym, key=f"symbtn_{sym}", use_container_width=True):
                 st.session_state.selected_symbol = sym
 

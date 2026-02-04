@@ -29,3 +29,22 @@ def format_trade_alert(decision) -> str:
     else:
         body = decision.commentary
     return f"{header}\n{sub}\n\n{body}"
+import streamlit as st
+
+def send_trade_alert_once(decision) -> bool:
+    """
+    Prevent duplicate Telegram alerts during Streamlit reruns.
+    One alert per symbol + action until app reset.
+    """
+    key = f"tg_sent_{decision.symbol}_{decision.action}"
+
+    if st.session_state.get(key):
+        return False
+
+    message = format_trade_alert(decision)
+    ok = send_telegram_message(message)
+
+    if ok:
+        st.session_state[key] = True
+
+    return ok

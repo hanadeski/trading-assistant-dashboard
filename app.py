@@ -89,13 +89,13 @@ def build_snapshot():
         return tr.max(axis=1).rolling(n).mean()
 
     def detect_regime(structure_ok: bool, liquidity_ok: bool, volatility_risk: str) -> str:
-    """
-    Simple regime classifier:
-    - extreme_vol: ATR% too high -> block execution
-    - chop: no structure -> no forcing BUY/SELL
-    - transition: structure but liquidity weak -> WATCH only
-    - trend: structure + liquidity -> allow breakout logic later
-    """
+        """
+        Simple regime classifier:
+        - extreme_vol: ATR% too high -> block execution
+        - chop: no structure -> no forcing BUY/SELL
+        - transition: structure but liquidity weak -> WATCH only
+        - trend: structure + liquidity -> allow breakout logic later
+        """
     if volatility_risk == "extreme":
         return "extreme_vol"
     if not structure_ok:

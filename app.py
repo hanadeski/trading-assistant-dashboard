@@ -35,6 +35,9 @@ st.markdown("""
 
 init_session_state(st.session_state)
 init_portfolio_state(st.session_state)
+# Ensure profiles exist even before snapshot so the homepage can render
+if not st.session_state.get("profiles"):
+    st.session_state.profiles = get_profiles()
 st.session_state.setdefault("portfolio_last_closed_count", 0)
 st.session_state.setdefault("portfolio_last_open_count", 0)
 # --- Step 11A: Keep last-known-good market data so the UI never goes blank ---
@@ -55,10 +58,6 @@ def fail_soft(title: str, e: Exception):
     if DEBUG:
         st.exception(e)
 
-# =========================
-# =========================
-    # --- Profiles ---
-        # =========================
 # 12 – Snapshot Cache (12.1 → 12.5)
 # =========================
 
@@ -192,32 +191,107 @@ def build_snapshot():
 
     return profiles, symbols, factors_by_symbol, decisions, decisions_by_symbol
 
+# =========================================================
+# UI — Always render homepage (never blank)
+# =========================================================
+
+# Ensure profiles always exist (even before snapshot)
+profiles = st.session_state.get("profiles") or get_profiles()
+st.session_state.profiles = profiles
+
+decisions = st.session_state.get("decisions", [])
+factors_by_symbol = st.session_state.get("factors_by_symbol", {})
+decisions_by_symbol = st.session_state.get("decisions_by_symbol", {})
+
+# ---------------------------------------------------------
+# Header
+# ---------------------------------------------------------
 st.title("Trading Assistant")
 st.caption("Booting… if this takes long, live data may be rate-limited.")
-st.write("✅ Reached pre-snapshot UI")
-
-
-
-profiles, symbols, decisions = [], [], []
-factors_by_symbol, decisions_by_symbol = {}, {}
 st.divider()
 
+# ---------------------------------------------------------
+# Snapshot state
+# ---------------------------------------------------------
 if "snapshot_ready" not in st.session_state:
     st.session_state.snapshot_ready = False
 
+# ---------------------------------------------------------
+# Snapshot button
+# ---------------------------------------------------------
 if st.button("🔄 Build Snapshot"):
-    if LIVE_DATA:
+    if not LIVE_DATA:
+        st.warning("Live data is OFF. Enable it in Safety toggles.")
+    else:
         with st.spinner("Building snapshot (live data)..."):
             try:
-                profiles, symbols, factors_by_symbol, decisions, decisions_by_symbol = build_snapshot()
+                (
+                    profiles,
+                    symbols,
+                    factors_by_symbol,
+                    decisions,
+                    decisions_by_symbol,
+                ) = build_snapshot()
+
                 update_portfolio(st.session_state, decisions, factors_by_symbol)
-                
+
                 st.session_state.profiles = profiles
                 st.session_state.decisions = decisions
                 st.session_state.factors_by_symbol = factors_by_symbol
                 st.session_state.decisions_by_symbol = decisions_by_symbol
+                st.session_state.snapshot_ready = True
+
+                st.success("Snapshot built ✅")
 
             except Exception as e:
+                st.session_state.snapshot_ready = False
                 fail_soft("Snapshot build failed", e)
+
+# ---------------------------------------------------------
+# Stable top UI (ALWAYS visible)
+# ---------------------------------------------------------
+try:
+    render_portfolio_panel(st.session_state)
+except Exception as e:
+    fail_soft("Portfolio panel failed", e)
+
+try:
+    render_top_bar(news_flag="Live prices (v1)")
+except Exception as e:
+    fail_soft("Top bar failed", e)
+
+st.divider()
+
+# ---------------------------------------------------------
+# Homepage body
+# ---------------------------------------------------------
+if not st.session_state.snapshot_ready:
+    st.info(
+        "Click **Build Snapshot** to load live data. "
+        "If Yahoo is rate-limiting, wait a minute and try again."
+    )
+    render_asset_table([], profiles)
+
+else:
+    selected = st.session_state.get("selected_symbol")
+
+    if selected:
+        pmap = {p.symbol: p for p in profiles}
+        render_asset_detail(
+            pmap.get(selected),
+            decisions_by_symbol.get(selected),
+            factors_by_symbol.get(selected, {}),
+        )
+        render_ai_commentary(decisions_by_symbol.get(selected))
+
     else:
-        st.warning("Live data is OFF. Enable it in Safety toggles.")
+        left, right = st.columns([0.7, 0.3], gap="large")
+
+        with left:
+            render_asset_table(decisions, profiles)
+
+        with right:
+            top = sorted(
+                decisions, key=lambda d: d.confidence, reverse=True
+            )
+            render_ai_commentary(top[0] if top else None)

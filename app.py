@@ -88,6 +88,22 @@ def build_snapshot():
         tr["lc"] = (low - close.shift()).abs()
         return tr.max(axis=1).rolling(n).mean()
 
+    def detect_regime(structure_ok: bool, liquidity_ok: bool, volatility_risk: str) -> str:
+    """
+    Simple regime classifier:
+    - extreme_vol: ATR% too high -> block execution
+    - chop: no structure -> no forcing BUY/SELL
+    - transition: structure but liquidity weak -> WATCH only
+    - trend: structure + liquidity -> allow breakout logic later
+    """
+    if volatility_risk == "extreme":
+        return "extreme_vol"
+    if not structure_ok:
+        return "chop"
+    if structure_ok and not liquidity_ok:
+        return "transition"
+    return "trend"
+
     for sym in symbols:
         try:
             df = fetch_ohlc(sym, interval="15m", period="5d")
@@ -107,6 +123,7 @@ def build_snapshot():
                 "df": df,
                 "news_risk": "none",
                 "volatility_risk": "normal",
+                "regime": "no_data",
                 "entry": "TBD",
                 "stop": "TBD",
                 "tp1": "TBD",
@@ -146,6 +163,12 @@ def build_snapshot():
             "extreme" if atr_pct >= extreme_thr
             else "high" if atr_pct >= high_thr
             else "normal"
+        )
+        # --- Regime detection ---
+        regime = detect_regime(
+            structure_ok=structure_ok,
+            liquidity_ok=liquidity_ok,
+            volatility_risk=volatility_risk,
         )
 
         if bias == "bullish":

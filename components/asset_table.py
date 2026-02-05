@@ -19,24 +19,31 @@ def render_asset_table(decisions, profiles):
     st.markdown("## Watchlist")
     st.caption("Click a symbol button to open details. Telegram alerts only fire on high-confidence BUY/SELL.")
 
-    # Hard guard: if decisions is empty, don't build a df that can crash UI
-    if not decisions:
-        st.info("Waiting for live data / decisions…")
-        return
-
     prof_map = {p.symbol: p for p in profiles}
 
     rows = []
-    for d in decisions:
-        p = prof_map.get(d.symbol)
-        rows.append({
-            "Asset": (p.display if p else d.symbol),
-            "Symbol": d.symbol,
-            "Bias": emoji_bias(d.bias),
-            "Mode": (d.mode.capitalize() if getattr(d, "mode", None) else ""),
-            "Confidence": f"{float(getattr(d, 'confidence', 0.0)):.1f}/10",
-            "Action": style_action(getattr(d, "action", "")),
-        })
+    if not decisions:
+        st.info("Waiting for live data / decisions…")
+        for profile in profiles:
+            rows.append({
+                "Asset": profile.display,
+                "Symbol": profile.symbol,
+                "Bias": emoji_bias("neutral"),
+                "Mode": "",
+                "Confidence": "—",
+                "Action": style_action("WAIT"),
+            })
+    else:
+        for d in decisions:
+            p = prof_map.get(d.symbol)
+            rows.append({
+                "Asset": (p.display if p else d.symbol),
+                "Symbol": d.symbol,
+                "Bias": emoji_bias(d.bias),
+                "Mode": (d.mode.capitalize() if getattr(d, "mode", None) else ""),
+                "Confidence": f"{float(getattr(d, 'confidence', 0.0)):.1f}/10",
+                "Action": style_action(getattr(d, "action", "")),
+            })
 
     # Force a stable schema no matter what
     df = pd.DataFrame(rows, columns=["Asset", "Symbol", "Bias", "Mode", "Confidence", "Action"])
@@ -47,8 +54,7 @@ def render_asset_table(decisions, profiles):
     cols = st.columns(6)
     for i, sym in enumerate(symbols[:18]):
         with cols[i % 6]:
-            # Optional: explicit key makes it extra safe
-            if st.button(sym, key=f"symbtn_{sym}", use_container_width=True):
+            if st.button(sym, use_container_width=True):
                 st.session_state.selected_symbol = sym
 
     # Table view

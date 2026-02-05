@@ -272,6 +272,22 @@ def build_snapshot():
 
     return profiles, symbols, factors_by_symbol, decisions, decisions_by_symbol
 
+# --- TELEGRAM CONNECTION TEST (temporary) ---
+if st.sidebar.button("🔔 Test Telegram"):
+    send_trade_alert_once(
+        asset="SYSTEM",
+        action="TEST",
+        confidence=10,
+        entry="N/A",
+        stop="N/A",
+        tp1="N/A",
+        tp2="N/A",
+        rr="N/A",
+        mode="SYSTEM"
+    )
+    st.sidebar.success("Telegram test sent")
+
+
 # =========================================================
 # UI — Always render homepage (never blank)
 # =========================================================

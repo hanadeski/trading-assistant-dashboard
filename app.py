@@ -210,13 +210,13 @@ def build_snapshot():
         # --- RR targets (min 3R, aim 4–6R when liquidity is strong) ---
         if bias == "bullish":
             stop = entry - 1.2 * a
-            R = entry - stop
+            R = entry - stop  # risk per unit
         
             if liquidity_ok:
-                tp1 = entry + 4 * R   # first TP = 4R
-                tp2 = entry + 6 * R   # runner = 6R
+                tp1 = entry + 4 * R
+                tp2 = entry + 6 * R
             else:
-                tp1 = entry + 3 * R   # minimum 3R
+                tp1 = entry + 3 * R
                 tp2 = entry + 4 * R
         
         elif bias == "bearish":

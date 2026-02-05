@@ -160,9 +160,16 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
         return Decision(symbol, bias, "standby", confidence, "DO NOTHING",
                         "No edge: choppy or mid-range conditions.", {})
 
-    # --- Breakout promotion ---
-    if regime == "trend" and volatility_risk == "normal" and structure_ok and liquidity_ok:
-        if rr >= 3.0:
+        # --- Breakout promotion (WATCH/WAIT -> BUY/SELL on CROSS) ---
+        if (
+            regime == "trend"
+            and volatility_risk == "normal"
+            and structure_ok
+            and liquidity_ok
+            and rr >= 3.0
+            and score >= 7.0
+            and confidence >= 8.0
+        ):
             if bias == "bullish" and breakout_up:
                 trade_plan = {
                     "entry": factors.get("entry", "TBD"),
@@ -170,18 +177,11 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
                     "tp1": factors.get("tp1", "TBD"),
                     "tp2": factors.get("tp2", "TBD"),
                     "rr": rr,
-                    "breakout": {
-                        "dir": "up",
-                        "level": breakout_level_up,
-                        "lookback": lookback,
-                    },
+                    "breakout": {"dir": "up", "level": breakout_level_up, "lookback": lookback},
+                    "regime": regime,
                 }
-                return Decision(
-                    symbol, bias, "balanced", confidence,
-                    "BUY NOW",
-                    "Breakout confirmed above prior high.",
-                    trade_plan
-                )
+                return Decision(symbol, bias, "balanced", confidence, "BUY NOW",
+                                "Breakout confirmed above prior high.", trade_plan)
     
             if bias == "bearish" and breakout_dn:
                 trade_plan = {
@@ -190,20 +190,13 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
                     "tp1": factors.get("tp1", "TBD"),
                     "tp2": factors.get("tp2", "TBD"),
                     "rr": rr,
-                    "breakout": {
-                        "dir": "down",
-                        "level": breakout_level_dn,
-                        "lookback": lookback,
-                    },
+                    "breakout": {"dir": "down", "level": breakout_level_dn, "lookback": lookback},
+                    "regime": regime,
                 }
-                return Decision(
-                    symbol, bias, "balanced", confidence,
-                    "SELL NOW",
-                    "Breakout confirmed below prior low.",
-                    trade_plan
-                )
+                return Decision(symbol, bias, "balanced", confidence, "SELL NOW",
+                                "Breakout confirmed below prior low.", trade_plan)
 
-    
+
     if score < 7.0:
         return Decision(symbol, bias, "conservative", confidence, "WATCH",
                         "Watch: bias exists but confirmation is incomplete.", {})
@@ -257,37 +250,4 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
     return Decision(symbol, bias, mode, confidence, action,
                     "High-confidence setup: conditions align strongly.", trade_plan)
 
-    
-    # - Must have structure + RR + directional bias
-    # - Liquidity is preferred: without it we won't fire BUY/SELL
-    # - FVG is a *quality* gate: without strong FVG, we downgrade BUY/SELL -> WAIT
-    if rr_ok and structure_ok and bias in ("bullish", "bearish"):
-        if not liquidity_ok:
-            return Decision(
-                symbol, bias, mode, confidence,
-                "WAIT",
-                "High score, but liquidity not confirmed; wait for cleaner conditions.",
-                {}
-            )
-    
-        # Liquidity OK + RR OK + structure OK => eligible to trade
-        # If FVG isn't strong enough, be conservative and WAIT
-        if not fvg_gate:
-            return Decision(
-                symbol, bias, mode, confidence,
-                "WAIT",
-                "Setup is strong, but FVG context isn’t strong enough; wait for cleaner confirmation/entry.",
-                {}
-            )
-    
-        action = "BUY NOW" if bias == "bullish" else "SELL NOW"
-        trade_plan = {
-            "entry": factors.get("entry", "TBD"),
-            "stop": factors.get("stop", "TBD"),
-            "tp1": factors.get("tp1", "TBD"),
-            "tp2": factors.get("tp2", "TBD"),
-            "rr": rr,
-        }
-        return Decision(symbol, bias, mode, confidence, action, "High-confidence setup: conditions align strongly.", trade_plan)
-    
     

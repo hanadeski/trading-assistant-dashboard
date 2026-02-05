@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent))
 import streamlit as st
+from streamlit_autorefresh import st_autorefresh
 import pandas as pd
 from engine.profiles import get_profiles
 from engine.decision_layer import run_decisions
@@ -22,6 +23,9 @@ from alerts.telegram import send_trade_alert_once
 from state.session_state import init_session_state
 
 st.set_page_config(page_title="Trading Assistant", layout="wide", initial_sidebar_state="collapsed")
+
+# Auto refresh every 30 seconds for live signals
+st_autorefresh(interval=30000, key="auto_refresh")
 
 # Clean minimal dark theme
 st.markdown("""
@@ -269,29 +273,17 @@ def build_snapshot():
     # --- Decisions ---
     decisions = run_decisions(profiles, factors_by_symbol)
     decisions_by_symbol = {d.symbol: d for d in decisions}
+    # =========================
+    # LIVE TELEGRAM ALERTS (HIGH CONF ONLY)
+    # =========================
+    ALERT_ACTIONS = {"BUY NOW", "SELL NOW"}  # add "ADD NOW" later if you want
+    MIN_CONFIDENCE = 9.0
+    
+    for d in decisions:
+        if (d.action in ALERT_ACTIONS) and (float(d.confidence) >= MIN_CONFIDENCE):
+            send_trade_alert_once(d)
 
     return profiles, symbols, factors_by_symbol, decisions, decisions_by_symbol
-
-# --- TELEGRAM CONNECTION TEST (temporary) ---
-from types import SimpleNamespace
-
-if st.sidebar.button("🔔 Test Telegram"):
-    test_decision = SimpleNamespace(
-        symbol="SYSTEM",
-        action="TEST",
-        confidence=10.0,
-        bias="neutral",
-        mode="system",
-        commentary="Telegram connection test",
-        trade_plan={}  # keep empty so formatter uses commentary
-    )
-
-    ok = send_trade_alert_once(test_decision)
-    if ok:
-        st.sidebar.success("Telegram test sent ✅")
-    else:
-        st.sidebar.warning("Telegram not sent (duplicate or secrets missing) ⚠️")
-
 
 
 # =========================================================

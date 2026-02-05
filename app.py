@@ -279,18 +279,18 @@ if st.sidebar.button("🔔 Test Telegram"):
     test_decision = SimpleNamespace(
         symbol="SYSTEM",
         action="TEST",
-        confidence=10,
-        entry="N/A",
-        stop="N/A",
-        tp1="N/A",
-        tp2="N/A",
-        rr="N/A",
-        mode="SYSTEM",
-        commentary="Telegram connection test"
+        confidence=10.0,
+        bias="neutral",
+        mode="system",
+        commentary="Telegram connection test",
+        trade_plan={}  # keep empty so formatter uses commentary
     )
 
-    send_trade_alert_once(test_decision)
-    st.sidebar.success("Telegram test sent")
+    ok = send_trade_alert_once(test_decision)
+    if ok:
+        st.sidebar.success("Telegram test sent ✅")
+    else:
+        st.sidebar.warning("Telegram not sent (duplicate or secrets missing) ⚠️")
 
 
 

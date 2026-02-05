@@ -1,9 +1,9 @@
 # force redeploy
 import sys
+import time
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent))
 import streamlit as st
-from streamlit_autorefresh import st_autorefresh
 import pandas as pd
 from engine.profiles import get_profiles
 from engine.decision_layer import run_decisions
@@ -19,13 +19,10 @@ from components.asset_table import render_asset_table
 from components.ai_commentary import render_ai_commentary
 from components.asset_detail import render_asset_detail
 from components.portfolio_panel import render_portfolio_panel
-from alerts.telegram import send_trade_alert_once
+from alerts.telegram import send_telegram_message, format_trade_alert
 from state.session_state import init_session_state
 
 st.set_page_config(page_title="Trading Assistant", layout="wide", initial_sidebar_state="collapsed")
-
-# Auto refresh every 30 seconds for live signals
-st_autorefresh(interval=30000, key="auto_refresh")
 
 # Clean minimal dark theme
 st.markdown("""
@@ -48,6 +45,32 @@ st.session_state.setdefault("portfolio_last_open_count", 0)
 st.session_state.setdefault("last_good_ohlc", {})        # dict[symbol] -> pd.DataFrame
 st.session_state.setdefault("ohlc_errors", {})           # dict[symbol] -> str
 st.session_state.setdefault("ohlc_used_fallback", set()) # set of symbols that used fallback this run
+st.session_state.setdefault("last_alerted_action", {})   # dict[symbol] -> str
+st.session_state.setdefault("last_alerted_ts", {})       # dict[symbol] -> int
+
+ALERT_COOLDOWN_SECS = 60 * 30  # 30 minutes
+
+def maybe_send_trade_alerts(decisions):
+    now = int(time.time())
+    last_action = st.session_state["last_alerted_action"]
+    last_ts = st.session_state["last_alerted_ts"]
+
+    for decision in decisions:
+        if decision.action not in ("BUY NOW", "SELL NOW"):
+            continue
+        if ALERT_HIGHCONF and decision.confidence < 9.0:
+            continue
+
+        last = last_action.get(decision.symbol)
+        last_time = last_ts.get(decision.symbol, 0)
+        in_window = (now - last_time) < ALERT_COOLDOWN_SECS
+
+        if in_window and last == decision.action and not ALERT_MODE3:
+            continue
+
+        if send_telegram_message(format_trade_alert(decision)):
+            last_action[decision.symbol] = decision.action
+            last_ts[decision.symbol] = now
 # =========================
 # 10B — Safety / debug toggles
 # =========================
@@ -56,7 +79,6 @@ with st.sidebar.expander("⚙️ Safety toggles", expanded=False):
     ALERT_MODE3 = st.toggle("Telegram Mode 3 (opens + closes)", value=True)
     ALERT_HIGHCONF = st.toggle("High-confidence BUY/SELL alerts", value=True)
     LIVE_DATA = st.toggle("Live data (yfinance)", value=True)
-    ARM_ALERTS = st.toggle("ARM alerts (LIVE Telegram)", value=False)
 
 def fail_soft(title: str, e: Exception):
     st.error(f"{title}: {e}")
@@ -85,29 +107,13 @@ def build_snapshot():
 
     def ema(series, n):
         return series.ewm(span=n, adjust=False).mean()
-
+    
     def atr(df, n=14):
         high, low, close = df["high"], df["low"], df["close"]
         tr = (high - low).to_frame("hl")
         tr["hc"] = (high - close.shift()).abs()
         tr["lc"] = (low - close.shift()).abs()
         return tr.max(axis=1).rolling(n).mean()
-
-    def detect_regime(structure_ok: bool, liquidity_ok: bool, volatility_risk: str) -> str:
-        """
-        Simple regime classifier:
-        - extreme_vol: ATR% too high -> block execution
-        - chop: no structure -> no forcing BUY/SELL
-        - transition: structure but liquidity weak -> WATCH only
-        - trend: structure + liquidity -> allow breakout logic later
-        """
-        if volatility_risk == "extreme":
-            return "extreme_vol"
-        if not structure_ok:
-            return "chop"
-        if structure_ok and not liquidity_ok:
-            return "transition"
-        return "trend"
 
     for sym in symbols:
         try:
@@ -128,22 +134,12 @@ def build_snapshot():
                 "df": df,
                 "news_risk": "none",
                 "volatility_risk": "normal",
-                "regime": "no_data",
                 "entry": "TBD",
                 "stop": "TBD",
                 "tp1": "TBD",
                 "tp2": "TBD",
             }
             continue
-
-        volatility_risk = "normal"
-        regime = "no_data"
-
-        LOOKBACK = 20
-        breakout_up = False
-        breakout_dn = False
-        breakout_level_up = None
-        breakout_level_dn = None
 
         # === your existing factor logic stays the same ===
         c = df["close"]
@@ -179,61 +175,14 @@ def build_snapshot():
             else "normal"
         )
 
-        # --- Regime detection ---
-        regime = detect_regime(
-            structure_ok=structure_ok,
-            liquidity_ok=liquidity_ok,
-            volatility_risk=volatility_risk,
-        )
-        
-        # =========================================
-        # --- Breakout trigger (CROSS) so it fires once, not every rerun ---
-        LOOKBACK = 20
-        prior_high = df["high"].shift(1).rolling(LOOKBACK).max()
-        prior_low  = df["low"].shift(1).rolling(LOOKBACK).min()
-        
-        breakout_level_up = float(prior_high.iloc[-1]) if pd.notna(prior_high.iloc[-1]) else None
-        breakout_level_dn = float(prior_low.iloc[-1]) if pd.notna(prior_low.iloc[-1]) else None
-        
-        last_close = float(df["close"].iloc[-1])
-        prev_close = float(df["close"].iloc[-2]) if len(df) >= 2 else last_close
-        
-        breakout_up = (
-            breakout_level_up is not None
-            and prev_close <= breakout_level_up
-            and last_close > breakout_level_up
-        )
-        
-        breakout_dn = (
-            breakout_level_dn is not None
-            and prev_close >= breakout_level_dn
-            and last_close < breakout_level_dn
-        )
-
-
-        # --- RR targets (min 3R, aim 4–6R when liquidity is strong) ---
         if bias == "bullish":
             stop = entry - 1.2 * a
-            R = entry - stop  # risk per unit
-        
-            if liquidity_ok:
-                tp1 = entry + 4 * R
-                tp2 = entry + 6 * R
-            else:
-                tp1 = entry + 3 * R
-                tp2 = entry + 4 * R
-        
+            tp1 = entry + 2 * (entry - stop)
+            tp2 = entry + 3 * (entry - stop)
         elif bias == "bearish":
             stop = entry + 1.2 * a
-            R = stop - entry
-        
-            if liquidity_ok:
-                tp1 = entry - 4 * R
-                tp2 = entry - 6 * R
-            else:
-                tp1 = entry - 3 * R
-                tp2 = entry - 4 * R
-        
+            tp1 = entry - 2 * (stop - entry)
+            tp2 = entry - 3 * (stop - entry)
         else:
             stop = tp1 = tp2 = "TBD"
 
@@ -257,34 +206,17 @@ def build_snapshot():
             "df": df,
             "news_risk": "none",
             "volatility_risk": volatility_risk,
-            "regime": regime,
             "entry": round(entry, 5),
             "stop": round(stop, 5) if isinstance(stop, float) else stop,
             "tp1": round(tp1, 5) if isinstance(tp1, float) else tp1,
             "tp2": round(tp2, 5) if isinstance(tp2, float) else tp2,
-
-            "breakout_up": breakout_up,
-            "breakout_dn": breakout_dn,
-            "breakout_level_up": breakout_level_up,
-            "breakout_level_dn": breakout_level_dn,
-            "breakout_lookback": LOOKBACK,
-            }
+        }
 
     # --- Decisions ---
     decisions = run_decisions(profiles, factors_by_symbol)
     decisions_by_symbol = {d.symbol: d for d in decisions}
-    # =========================
-    # LIVE TELEGRAM ALERTS (HIGH CONF ONLY)
-    # =========================
-    ALERT_ACTIONS = {"BUY NOW", "SELL NOW"}  # add "ADD NOW" later if you want
-    MIN_CONFIDENCE = 9.0
-    
-    for d in decisions:
-        if (d.action in ALERT_ACTIONS) and (float(d.confidence) >= MIN_CONFIDENCE):
-            send_trade_alert_once(d)
 
     return profiles, symbols, factors_by_symbol, decisions, decisions_by_symbol
-
 
 # =========================================================
 # UI — Always render homepage (never blank)
@@ -329,18 +261,13 @@ if st.button("🔄 Build Snapshot"):
                 ) = build_snapshot()
 
                 update_portfolio(st.session_state, decisions, factors_by_symbol)
+                maybe_send_trade_alerts(decisions)
 
                 st.session_state.profiles = profiles
                 st.session_state.decisions = decisions
                 st.session_state.factors_by_symbol = factors_by_symbol
                 st.session_state.decisions_by_symbol = decisions_by_symbol
                 st.session_state.snapshot_ready = True
-                # --- Telegram alerts (post-snapshot) ---
-                if ARM_ALERTS and ALERT_HIGHCONF:
-                    for d in decisions:
-                        if d.action in ("BUY NOW", "SELL NOW"):
-                            # send_trade_alert_once prevents spam on reruns
-                            send_trade_alert_once(d)
 
                 st.success("Snapshot built ✅")
 
@@ -396,3 +323,4 @@ else:
                 decisions, key=lambda d: d.confidence, reverse=True
             )
             render_ai_commentary(top[0] if top else None)
+

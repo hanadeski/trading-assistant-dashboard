@@ -81,6 +81,9 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
     near_fvg = bool(factors.get("near_fvg", False))
     fvg_score = float(factors.get("fvg_score", 0.0))
     fvg_gate = near_fvg and (fvg_score >= 0.6)
+    # Markets where FVG remains a HARD quality gate
+    FVG_HARD_GATE_SYMBOLS = {"US30", "US100", "US500", "WTI", "XAUUSD", "XAGUSD"}
+    fvg_hard_gate = symbol in FVG_HARD_GATE_SYMBOLS
 
     # ------------------------
     # RR thresholds
@@ -116,7 +119,11 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
     # Soft de-risk: if FVG score present, reduce score a bit (as you had)
     if fvg_score > 0.0:
         score -= min(0.6, 0.2 + 0.6 * fvg_score)
-
+    # FVG BOOSTER (does NOT block trades for FX)
+    if fvg_score >= 0.6:
+        score += 0.5
+    elif fvg_score >= 0.3:
+        score += 0.2
     score = clamp(score, 0.0, 10.0)
 
     # ------------------------
@@ -228,11 +235,16 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
         return Decision(symbol, bias, mode, confidence, "WAIT",
                         "High score, but liquidity not confirmed; wait for cleaner conditions.", {})
 
-    # Quality gate: require strong FVG context for execution (for now)
-    if not fvg_gate:
-        return Decision(symbol, bias, mode, confidence, "WAIT",
-                        "Setup is strong, but FVG context isn’t strong enough; wait for cleaner confirmation/entry.", {})
-
+    # FVG handling:
+    # Hard gate ONLY for indices/commodities
+    if fvg_hard_gate and not fvg_gate:
+        return Decision(
+            symbol, bias, mode, confidence,
+            "WAIT",
+            "Setup strong but FVG context insufficient for this market.",
+            {}
+        )
+    
     # Final throttle
     if confidence < 9.0:
         return Decision(symbol, bias, mode, confidence, "WAIT",

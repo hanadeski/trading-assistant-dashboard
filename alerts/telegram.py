@@ -2,6 +2,7 @@ import os
 import requests
 import time
 import streamlit as st
+from data.news_calendar import get_high_impact_news
 
 def _get_secret(name: str):
     # Streamlit Cloud secrets first
@@ -74,6 +75,11 @@ def send_trade_alert_once(decision) -> bool:
 
     # Respect ARM toggle (safety)
     if not st.session_state.get("arm_alerts", True):
+        return False
+            
+    # --- NEWS FILTER ---
+    news_events = get_high_impact_news()
+    if news_events:
         return False
 
     symbol = getattr(decision, "symbol", "UNKNOWN")

@@ -164,12 +164,33 @@ def build_snapshot():
             else "high" if atr_pct >= high_thr
             else "normal"
         )
+
         # --- Regime detection ---
         regime = detect_regime(
             structure_ok=structure_ok,
             liquidity_ok=liquidity_ok,
             volatility_risk=volatility_risk,
         )
+        
+        # =========================================
+        LOOKBACK = 20
+        
+        prior_high = df["high"].shift(1).rolling(LOOKBACK).max()
+        prior_low  = df["low"].shift(1).rolling(LOOKBACK).min()
+        
+        breakout_up = (
+            df["close"].iloc[-1] > prior_high.iloc[-1]
+            if pd.notna(prior_high.iloc[-1]) else False
+        )
+        
+        breakout_dn = (
+            df["close"].iloc[-1] < prior_low.iloc[-1]
+            if pd.notna(prior_low.iloc[-1]) else False
+        )
+        
+        breakout_level_up = float(prior_high.iloc[-1]) if pd.notna(prior_high.iloc[-1]) else None
+        breakout_level_dn = float(prior_low.iloc[-1]) if pd.notna(prior_low.iloc[-1]) else None
+
 
         if bias == "bullish":
             stop = entry - 1.2 * a
@@ -207,7 +228,13 @@ def build_snapshot():
             "stop": round(stop, 5) if isinstance(stop, float) else stop,
             "tp1": round(tp1, 5) if isinstance(tp1, float) else tp1,
             "tp2": round(tp2, 5) if isinstance(tp2, float) else tp2,
-        }
+
+            "breakout_up": breakout_up,
+            "breakout_dn": breakout_dn,
+            "breakout_level_up": breakout_level_up,
+            "breakout_level_dn": breakout_level_dn,
+            "breakout_lookback": LOOKBACK,
+            }
 
     # --- Decisions ---
     decisions = run_decisions(profiles, factors_by_symbol)

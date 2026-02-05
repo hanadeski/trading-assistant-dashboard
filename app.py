@@ -18,7 +18,7 @@ from components.asset_table import render_asset_table
 from components.ai_commentary import render_ai_commentary
 from components.asset_detail import render_asset_detail
 from components.portfolio_panel import render_portfolio_panel
-from alerts.telegram import send_telegram_message
+from alerts.telegram import send_trade_alert_once
 from state.session_state import init_session_state
 
 st.set_page_config(page_title="Trading Assistant", layout="wide", initial_sidebar_state="collapsed")
@@ -52,6 +52,7 @@ with st.sidebar.expander("⚙️ Safety toggles", expanded=False):
     ALERT_MODE3 = st.toggle("Telegram Mode 3 (opens + closes)", value=True)
     ALERT_HIGHCONF = st.toggle("High-confidence BUY/SELL alerts", value=True)
     LIVE_DATA = st.toggle("Live data (yfinance)", value=True)
+    ARM_ALERTS = st.toggle("ARM alerts (LIVE Telegram)", value=False)
 
 def fail_soft(title: str, e: Exception):
     st.error(f"{title}: {e}")
@@ -206,14 +207,29 @@ def build_snapshot():
         )
 
 
+        # --- RR targets (min 3R, aim 4–6R when liquidity is strong) ---
         if bias == "bullish":
             stop = entry - 1.2 * a
-            tp1 = entry + 2 * (entry - stop)
-            tp2 = entry + 3 * (entry - stop)
+            R = entry - stop
+        
+            if liquidity_ok:
+                tp1 = entry + 4 * R   # first TP = 4R
+                tp2 = entry + 6 * R   # runner = 6R
+            else:
+                tp1 = entry + 3 * R   # minimum 3R
+                tp2 = entry + 4 * R
+        
         elif bias == "bearish":
             stop = entry + 1.2 * a
-            tp1 = entry - 2 * (stop - entry)
-            tp2 = entry - 3 * (stop - entry)
+            R = stop - entry
+        
+            if liquidity_ok:
+                tp1 = entry - 4 * R
+                tp2 = entry - 6 * R
+            else:
+                tp1 = entry - 3 * R
+                tp2 = entry - 4 * R
+        
         else:
             stop = tp1 = tp2 = "TBD"
 
@@ -305,6 +321,12 @@ if st.button("🔄 Build Snapshot"):
                 st.session_state.factors_by_symbol = factors_by_symbol
                 st.session_state.decisions_by_symbol = decisions_by_symbol
                 st.session_state.snapshot_ready = True
+                # --- Telegram alerts (post-snapshot) ---
+                if ARM_ALERTS and ALERT_HIGHCONF:
+                    for d in decisions:
+                        if d.action in ("BUY NOW", "SELL NOW"):
+                            # send_trade_alert_once prevents spam on reruns
+                            send_trade_alert_once(d)
 
                 st.success("Snapshot built ✅")
 

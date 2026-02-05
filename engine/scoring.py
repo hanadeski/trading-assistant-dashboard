@@ -31,6 +31,14 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
     volatility_risk = factors.get("volatility_risk", "normal")
     news_risk = factors.get("news_risk", "none")
     regime = factors.get("regime", "trend")  # trend | transition | chop | extreme_vol | no_data
+    
+    # --- Breakout fields ---
+    breakout_up = bool(factors.get("breakout_up", False))
+    breakout_dn = bool(factors.get("breakout_dn", False))
+    breakout_level_up = factors.get("breakout_level_up", None)
+    breakout_level_dn = factors.get("breakout_level_dn", None)
+    lookback = int(factors.get("breakout_lookback", 20))
+
 
     # ------------------------
     # Hard caps / regime gate
@@ -152,6 +160,50 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
         return Decision(symbol, bias, "standby", confidence, "DO NOTHING",
                         "No edge: choppy or mid-range conditions.", {})
 
+    # --- Breakout promotion ---
+    if regime == "trend" and volatility_risk == "normal" and structure_ok and liquidity_ok:
+        if rr >= 3.0:
+            if bias == "bullish" and breakout_up:
+                trade_plan = {
+                    "entry": factors.get("entry", "TBD"),
+                    "stop": factors.get("stop", "TBD"),
+                    "tp1": factors.get("tp1", "TBD"),
+                    "tp2": factors.get("tp2", "TBD"),
+                    "rr": rr,
+                    "breakout": {
+                        "dir": "up",
+                        "level": breakout_level_up,
+                        "lookback": lookback,
+                    },
+                }
+                return Decision(
+                    symbol, bias, "balanced", confidence,
+                    "BUY NOW",
+                    "Breakout confirmed above prior high.",
+                    trade_plan
+                )
+    
+            if bias == "bearish" and breakout_dn:
+                trade_plan = {
+                    "entry": factors.get("entry", "TBD"),
+                    "stop": factors.get("stop", "TBD"),
+                    "tp1": factors.get("tp1", "TBD"),
+                    "tp2": factors.get("tp2", "TBD"),
+                    "rr": rr,
+                    "breakout": {
+                        "dir": "down",
+                        "level": breakout_level_dn,
+                        "lookback": lookback,
+                    },
+                }
+                return Decision(
+                    symbol, bias, "balanced", confidence,
+                    "SELL NOW",
+                    "Breakout confirmed below prior low.",
+                    trade_plan
+                )
+
+    
     if score < 7.0:
         return Decision(symbol, bias, "conservative", confidence, "WATCH",
                         "Watch: bias exists but confirmation is incomplete.", {})

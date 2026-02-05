@@ -131,6 +131,15 @@ def build_snapshot():
             }
             continue
 
+        volatility_risk = "normal"
+        regime = "no_data"
+
+        LOOKBACK = 20
+        breakout_up = False
+        breakout_dn = False
+        breakout_level_up = None
+        breakout_level_dn = None
+
         # === your existing factor logic stays the same ===
         c = df["close"]
         ema_fast = ema(c, 20)

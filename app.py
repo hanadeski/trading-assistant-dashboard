@@ -182,23 +182,28 @@ def build_snapshot():
         )
         
         # =========================================
+        # --- Breakout trigger (CROSS) so it fires once, not every rerun ---
         LOOKBACK = 20
-        
         prior_high = df["high"].shift(1).rolling(LOOKBACK).max()
         prior_low  = df["low"].shift(1).rolling(LOOKBACK).min()
         
+        breakout_level_up = float(prior_high.iloc[-1]) if pd.notna(prior_high.iloc[-1]) else None
+        breakout_level_dn = float(prior_low.iloc[-1]) if pd.notna(prior_low.iloc[-1]) else None
+        
+        last_close = float(df["close"].iloc[-1])
+        prev_close = float(df["close"].iloc[-2]) if len(df) >= 2 else last_close
+        
         breakout_up = (
-            df["close"].iloc[-1] > prior_high.iloc[-1]
-            if pd.notna(prior_high.iloc[-1]) else False
+            breakout_level_up is not None
+            and prev_close <= breakout_level_up
+            and last_close > breakout_level_up
         )
         
         breakout_dn = (
-            df["close"].iloc[-1] < prior_low.iloc[-1]
-            if pd.notna(prior_low.iloc[-1]) else False
+            breakout_level_dn is not None
+            and prev_close >= breakout_level_dn
+            and last_close < breakout_level_dn
         )
-        
-        breakout_level_up = float(prior_high.iloc[-1]) if pd.notna(prior_high.iloc[-1]) else None
-        breakout_level_dn = float(prior_low.iloc[-1]) if pd.notna(prior_low.iloc[-1]) else None
 
 
         if bias == "bullish":

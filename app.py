@@ -273,9 +273,11 @@ def build_snapshot():
     return profiles, symbols, factors_by_symbol, decisions, decisions_by_symbol
 
 # --- TELEGRAM CONNECTION TEST (temporary) ---
+from types import SimpleNamespace
+
 if st.sidebar.button("🔔 Test Telegram"):
-    send_trade_alert_once(
-        asset="SYSTEM",
+    test_decision = SimpleNamespace(
+        symbol="SYSTEM",
         action="TEST",
         confidence=10,
         entry="N/A",
@@ -283,9 +285,13 @@ if st.sidebar.button("🔔 Test Telegram"):
         tp1="N/A",
         tp2="N/A",
         rr="N/A",
-        mode="SYSTEM"
+        mode="SYSTEM",
+        commentary="Telegram connection test"
     )
+
+    send_trade_alert_once(test_decision)
     st.sidebar.success("Telegram test sent")
+
 
 
 # =========================================================

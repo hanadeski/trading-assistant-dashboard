@@ -80,7 +80,7 @@ def build_snapshot():
 
     def ema(series, n):
         return series.ewm(span=n, adjust=False).mean()
-    
+
     def atr(df, n=14):
         high, low, close = df["high"], df["low"], df["close"]
         tr = (high - low).to_frame("hl")
@@ -96,13 +96,13 @@ def build_snapshot():
         - transition: structure but liquidity weak -> WATCH only
         - trend: structure + liquidity -> allow breakout logic later
         """
-    if volatility_risk == "extreme":
-        return "extreme_vol"
-    if not structure_ok:
-        return "chop"
-    if structure_ok and not liquidity_ok:
-        return "transition"
-    return "trend"
+        if volatility_risk == "extreme":
+            return "extreme_vol"
+        if not structure_ok:
+            return "chop"
+        if structure_ok and not liquidity_ok:
+            return "transition"
+        return "trend"
 
     for sym in symbols:
         try:
@@ -202,6 +202,7 @@ def build_snapshot():
             "df": df,
             "news_risk": "none",
             "volatility_risk": volatility_risk,
+            "regime": regime,
             "entry": round(entry, 5),
             "stop": round(stop, 5) if isinstance(stop, float) else stop,
             "tp1": round(tp1, 5) if isinstance(tp1, float) else tp1,

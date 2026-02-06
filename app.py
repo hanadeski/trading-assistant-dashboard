@@ -237,6 +237,14 @@ def build_snapshot():
         tr["lc"] = (low - close.shift()).abs()
         return tr.max(axis=1).rolling(n).mean()
 
+    def market_regime(close_series):
+        if close_series is None or close_series.empty or len(close_series) < 55:
+            return "range"
+        ema_mid = close_series.ewm(span=50, adjust=False).mean()
+        slope = ema_mid.iloc[-1] - ema_mid.iloc[-10]
+        slope_pct = abs(slope) / close_series.iloc[-1]
+        return "trend" if slope_pct > 0.0006 else "range"
+
     thresholds = adapt_thresholds()
 
     for sym in symbols:
@@ -254,6 +262,7 @@ def build_snapshot():
                 "structure_ok": False,
                 "liquidity_ok": False,
                 "certified": False,
+                "regime": "range",
                 "rr": 0.0,
                 "near_fvg": False,
                 "fvg_score": 0.0,
@@ -282,6 +291,8 @@ def build_snapshot():
             bias = "bearish"
         else:
             bias = "neutral"
+
+        regime = market_regime(c)
 
         htf_bias = "neutral"
         if htf_df is not None and not htf_df.empty and len(htf_df) >= 50:
@@ -340,6 +351,7 @@ def build_snapshot():
             "structure_ok": structure_ok,
             "liquidity_ok": liquidity_ok,
             "certified": certified,
+            "regime": regime,
             "rr": rr,
             "near_fvg": False,
             "fvg_score": 0.0,

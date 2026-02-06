@@ -1,7 +1,7 @@
 # engine/risk.py
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import is_dataclass
 from typing import Dict, Any
 
 def clamp(x: float, lo: float, hi: float) -> float:
@@ -100,5 +100,11 @@ def apply_sizing(decision, profile, factors: Dict[str, Any], default_equity: flo
         "stop_dist": stop_dist,
     }
 
-    # Use dataclasses.replace so we don't have to rebuild Decision() calls everywhere
-    return replace(decision, risk_pct=risk_pct, size=size, meta=meta, trade_plan=tp)
+    if not is_dataclass(decision):
+        return decision
+
+    decision.risk_pct = risk_pct
+    decision.size = size
+    decision.meta = meta
+    decision.trade_plan = tp
+    return decision

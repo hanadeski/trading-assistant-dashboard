@@ -102,7 +102,7 @@ def persist_state():
 load_persisted_state()
 
 ALERT_COOLDOWN_SECS = 60 * 30  # 30 minutes
-ALERT_CONFIDENCE_MIN = 8.5
+ALERT_CONFIDENCE_MIN = 8.0
 
 def maybe_send_trade_alerts(decisions):
     now = int(time.time())
@@ -215,6 +215,14 @@ with st.sidebar.expander("⚙️ Safety toggles", expanded=False):
     ALERT_MODE3 = st.toggle("Telegram Mode 3 (opens + closes)", value=True)
     ALERT_HIGHCONF = st.toggle("High-confidence BUY/SELL alerts", value=True)
     LIVE_DATA = st.toggle("Live data (yfinance)", value=True)
+    AUTO_REFRESH = st.toggle("Auto-refresh snapshot", value=False)
+    REFRESH_SECONDS = st.slider("Refresh interval (seconds)", 30, 600, 120, step=30)
+    if st.button("Send test Telegram alert"):
+        sent = send_telegram_message("✅ Test alert from Trading Assistant.")
+        if sent:
+            st.success("Test alert sent. Remove this button once confirmed.")
+        else:
+            st.error("Test alert failed. Check bot token/chat ID.")
 
 def fail_soft(title: str, e: Exception):
     st.error(f"{title}: {e}")
@@ -416,35 +424,51 @@ if "snapshot_ready" not in st.session_state:
 # ---------------------------------------------------------
 # Snapshot button
 # ---------------------------------------------------------
-if st.button("🔄 Build Snapshot"):
+if AUTO_REFRESH:
+    st_autorefresh = getattr(st, "autorefresh", None)
+    if callable(st_autorefresh):
+        st_autorefresh(interval=REFRESH_SECONDS * 1000, key="snapshot_autorefresh")
+    else:
+        st.caption("Auto-refresh not available in this Streamlit version.")
+
+def run_snapshot():
     if not LIVE_DATA:
         st.warning("Live data is OFF. Enable it in Safety toggles.")
-    else:
-        with st.spinner("Building snapshot (live data)..."):
-            try:
-                (
-                    profiles,
-                    symbols,
-                    factors_by_symbol,
-                    decisions,
-                    decisions_by_symbol,
-                ) = build_snapshot()
+        return
+    with st.spinner("Building snapshot (live data)..."):
+        try:
+            (
+                profiles,
+                symbols,
+                factors_by_symbol,
+                decisions,
+                decisions_by_symbol,
+            ) = build_snapshot()
 
-                update_portfolio(st.session_state, decisions, factors_by_symbol)
-                maybe_send_trade_alerts(decisions)
-                log_decisions(decisions, factors_by_symbol)
+            update_portfolio(st.session_state, decisions, factors_by_symbol)
+            maybe_send_trade_alerts(decisions)
+            log_decisions(decisions, factors_by_symbol)
 
-                st.session_state.profiles = profiles
-                st.session_state.decisions = decisions
-                st.session_state.factors_by_symbol = factors_by_symbol
-                st.session_state.decisions_by_symbol = decisions_by_symbol
-                st.session_state.snapshot_ready = True
+            st.session_state.profiles = profiles
+            st.session_state.decisions = decisions
+            st.session_state.factors_by_symbol = factors_by_symbol
+            st.session_state.decisions_by_symbol = decisions_by_symbol
+            st.session_state.snapshot_ready = True
 
-                st.success("Snapshot built ✅")
+            st.success("Snapshot built ✅")
 
-            except Exception as e:
-                st.session_state.snapshot_ready = False
-                fail_soft("Snapshot build failed", e)
+        except Exception as e:
+            st.session_state.snapshot_ready = False
+            fail_soft("Snapshot build failed", e)
+
+if st.button("🔄 Build Snapshot"):
+    run_snapshot()
+elif AUTO_REFRESH and LIVE_DATA:
+    last_auto = st.session_state.get("last_auto_snapshot_ts", 0)
+    now = time.time()
+    if now - last_auto >= max(REFRESH_SECONDS - 1, 1):
+        st.session_state["last_auto_snapshot_ts"] = now
+        run_snapshot()
 
 # ---------------------------------------------------------
 # Stable top UI (ALWAYS visible)

@@ -1,61 +1,57 @@
 import streamlit as st
 import pandas as pd
 
-def emoji_bias(bias: str) -> str:
-    return {"bullish":"🟢 Bullish", "bearish":"🔴 Bearish", "neutral":"⚪ Neutral"}.get(bias, "⚪ Neutral")
+from engine.symbols import symbol_meta
 
-def style_action(action: str) -> str:
-    if action == "BUY NOW":
-        return "🟢 BUY NOW"
-    if action == "SELL NOW":
-        return "🔴 SELL NOW"
-    if action == "WATCH":
-        return "🟡 WATCH"
-    if action == "WAIT":
-        return "🟠 WAIT"
-    return "⚫ DO NOTHING"
+
+def build_table(decisions, profiles):
+    rows = []
+
+    if not decisions:
+        for p in profiles:
+            rows.append(
+                {
+                    "Symbol": p.symbol,
+                    "Bias": "–",
+                    "Confidence": "–",
+                    "Action": "–",
+                }
+            )
+        return pd.DataFrame(rows)
+
+    for d in decisions:
+        rows.append(
+            {
+                "Symbol": d.symbol,
+                "Bias": d.bias.capitalize(),
+                "Confidence": f"{d.confidence:.1f}/10",
+                "Action": d.action,
+            }
+        )
+
+    return pd.DataFrame(rows)
+
 
 def render_asset_table(decisions, profiles):
-    st.markdown("## Watchlist")
-    st.caption("Click a symbol button to open details. Telegram alerts only fire on high-confidence BUY/SELL.")
+    if decisions is None:
+        decisions = []
 
-    prof_map = {p.symbol: p for p in profiles}
+    df = build_table(decisions, profiles)
 
-    rows = []
-    if not decisions:
-        st.info("Waiting for live data / decisions…")
-        for profile in profiles:
-            rows.append({
-                "Asset": profile.display,
-                "Symbol": profile.symbol,
-                "Bias": emoji_bias("neutral"),
-                "Mode": "",
-                "Confidence": "—",
-                "Action": style_action("WAIT"),
-            })
-    else:
-        for d in decisions:
-            p = prof_map.get(d.symbol)
-            rows.append({
-                "Asset": (p.display if p else d.symbol),
-                "Symbol": d.symbol,
-                "Bias": emoji_bias(d.bias),
-                "Mode": (d.mode.capitalize() if getattr(d, "mode", None) else ""),
-                "Confidence": f"{float(getattr(d, 'confidence', 0.0)):.1f}/10",
-                "Action": style_action(getattr(d, "action", "")),
-            })
+    st.markdown("### Watchlist")
 
-    # Force a stable schema no matter what
-    df = pd.DataFrame(rows, columns=["Asset", "Symbol", "Bias", "Mode", "Confidence", "Action"])
+    st.dataframe(
+        df,
+        use_container_width=True,
+        hide_index=True,
+    )
 
-    # Quick symbol buttons (safe even if df is weird)
-    symbols = df.get("Symbol", pd.Series(dtype=str)).dropna().astype(str).tolist()
-
-    cols = st.columns(6)
-    for i, sym in enumerate(symbols[:18]):
-        with cols[i % 6]:
-            if st.button(sym, use_container_width=True):
-                st.session_state.selected_symbol = sym
-
-    # Table view
-    st.dataframe(df.drop(columns=["Symbol"]), use_container_width=True, hide_index=True)
+    # Click-to-select in session state (simple)
+    if decisions:
+        selected = st.selectbox(
+            "Select a symbol to view details",
+            options=[d.symbol for d in decisions],
+            key="asset_select",
+        )
+        if selected:
+            st.session_state.selected_symbol = selected

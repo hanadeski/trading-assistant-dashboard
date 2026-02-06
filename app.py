@@ -53,9 +53,9 @@ st.session_state.setdefault("decision_log", [])          # list[dict]
 st.session_state.setdefault(
     "adaptive_thresholds",
     {
-        "setup_score_threshold": 7.0,
-        "execution_score_threshold": 8.5,
-        "execution_confidence_min": 8.5,
+        "setup_score_threshold": 6.6,
+        "execution_score_threshold": 7.8,
+        "execution_confidence_min": 7.8,
     },
 )
 st.session_state.setdefault("decision_log_max", 1000)
@@ -401,6 +401,10 @@ st.session_state.profiles = profiles
 decisions = st.session_state.get("decisions", [])
 factors_by_symbol = st.session_state.get("factors_by_symbol", {})
 decisions_by_symbol = st.session_state.get("decisions_by_symbol", {})
+st.session_state.pop("asset_select", None)
+if not st.session_state.get("selected_from_click"):
+    st.session_state.pop("selected_symbol", None)
+st.session_state["selected_from_click"] = False
 
 # ---------------------------------------------------------
 # Header
@@ -488,23 +492,20 @@ if not st.session_state.snapshot_ready:
 else:
     selected = st.session_state.get("selected_symbol")
 
-    if selected:
-        pmap = {p.symbol: p for p in profiles}
-        render_asset_detail(
-            pmap.get(selected),
-            decisions_by_symbol.get(selected),
-            factors_by_symbol.get(selected, {}),
-        )
-        render_ai_commentary(decisions_by_symbol.get(selected))
+    left, right = st.columns([0.7, 0.3], gap="large")
 
-    else:
-        left, right = st.columns([0.7, 0.3], gap="large")
-
-        with left:
-            render_asset_table(decisions, profiles)
-
-        with right:
-            top = sorted(
-                decisions, key=lambda d: d.confidence, reverse=True
+    with left:
+        render_asset_table(decisions, profiles)
+        if selected:
+            pmap = {p.symbol: p for p in profiles}
+            render_asset_detail(
+                pmap.get(selected),
+                decisions_by_symbol.get(selected),
+                factors_by_symbol.get(selected, {}),
             )
-            render_ai_commentary(top[0] if top else None)
+
+    with right:
+        top = sorted(
+            decisions, key=lambda d: d.confidence, reverse=True
+        )
+        render_ai_commentary(top[0] if top else None)

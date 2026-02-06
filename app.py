@@ -2,6 +2,7 @@
 import sys
 import time
 from pathlib import Path
+import json
 sys.path.append(str(Path(__file__).parent))
 import streamlit as st
 import pandas as pd
@@ -56,6 +57,33 @@ st.session_state.setdefault(
         "execution_confidence_min": 8.5,
     },
 )
+st.session_state.setdefault("decision_log_max", 1000)
+
+PERSIST_PATH = Path(__file__).parent / "state" / "decision_store.json"
+
+def load_persisted_state():
+    if not PERSIST_PATH.exists():
+        return
+    try:
+        payload = json.loads(PERSIST_PATH.read_text())
+    except Exception:
+        return
+    if isinstance(payload, dict):
+        log = payload.get("decision_log")
+        thresholds = payload.get("adaptive_thresholds")
+        if isinstance(log, list):
+            st.session_state["decision_log"] = log[-st.session_state["decision_log_max"] :]
+        if isinstance(thresholds, dict):
+            st.session_state["adaptive_thresholds"].update(thresholds)
+
+def persist_state():
+    payload = {
+        "decision_log": st.session_state["decision_log"][-st.session_state["decision_log_max"] :],
+        "adaptive_thresholds": st.session_state["adaptive_thresholds"],
+    }
+    PERSIST_PATH.write_text(json.dumps(payload))
+
+load_persisted_state()
 
 ALERT_COOLDOWN_SECS = 60 * 30  # 30 minutes
 ALERT_CONFIDENCE_MIN = 8.5
@@ -100,7 +128,11 @@ def log_decisions(decisions, factors_by_symbol):
             "structure_ok": factors.get("structure_ok"),
             "fvg_score": factors.get("fvg_score"),
             "htf_bias": factors.get("htf_bias"),
+            "outcome": None,
         })
+    if len(log) > st.session_state["decision_log_max"]:
+        st.session_state["decision_log"] = log[-st.session_state["decision_log_max"] :]
+    persist_state()
 
 def adapt_thresholds():
     log = st.session_state["decision_log"]
@@ -133,7 +165,18 @@ def adapt_thresholds():
     )
 
     st.session_state["adaptive_thresholds"] = thresholds
+    persist_state()
     return thresholds
+
+def record_trade_outcome(symbol: str, outcome: str):
+    """
+    Stub for manual outcome tracking (e.g., 'tp', 'sl', 'breakeven').
+    """
+    for entry in reversed(st.session_state["decision_log"]):
+        if entry.get("symbol") == symbol and entry.get("outcome") is None:
+            entry["outcome"] = outcome
+            break
+    persist_state()
 # =========================
 # 10B — Safety / debug toggles
 # =========================
@@ -409,3 +452,4 @@ else:
                 decisions, key=lambda d: d.confidence, reverse=True
             )
             render_ai_commentary(top[0] if top else None)
+

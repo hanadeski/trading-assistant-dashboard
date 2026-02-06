@@ -10,6 +10,7 @@ from engine.profiles import get_profiles
 from engine.decision_layer import run_decisions
 from engine.fvg import compute_fvg_context
 from engine.portfolio import init_portfolio_state, update_portfolio
+from streamlit_autorefresh import st_autorefresh
 
 
 # live data import
@@ -260,7 +261,6 @@ def build_snapshot():
         slope = ema_mid.iloc[-1] - ema_mid.iloc[-10]
         slope_pct = abs(slope) / close_series.iloc[-1]
         return "trend" if slope_pct > 0.0006 else "range"
-
     thresholds = adapt_thresholds()
 
     for sym in symbols:
@@ -419,11 +419,7 @@ if "snapshot_ready" not in st.session_state:
 # Snapshot button
 # ---------------------------------------------------------
 if AUTO_REFRESH:
-    st_autorefresh = getattr(st, "autorefresh", None)
-    if callable(st_autorefresh):
-        st_autorefresh(interval=REFRESH_SECONDS * 1000, key="snapshot_autorefresh")
-    else:
-        st.caption("Auto-refresh not available in this Streamlit version.")
+    st_autorefresh(interval=REFRESH_SECONDS * 1000, key="snapshot_autorefresh")
 
 def run_snapshot():
     if not LIVE_DATA:

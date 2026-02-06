@@ -108,5 +108,3 @@ def apply_sizing(decision, profile, factors: Dict[str, Any], default_equity: flo
     decision.meta = meta
     decision.trade_plan = tp
     return decision
-
-    return decision

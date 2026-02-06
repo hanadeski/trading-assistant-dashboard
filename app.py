@@ -217,12 +217,6 @@ with st.sidebar.expander("⚙️ Safety toggles", expanded=False):
     LIVE_DATA = st.toggle("Live data (yfinance)", value=True)
     AUTO_REFRESH = st.toggle("Auto-refresh snapshot", value=False)
     REFRESH_SECONDS = st.slider("Refresh interval (seconds)", 30, 600, 120, step=30)
-    if st.button("Send test Telegram alert"):
-        sent = send_telegram_message("✅ Test alert from Trading Assistant.")
-        if sent:
-            st.success("Test alert sent. Remove this button once confirmed.")
-        else:
-            st.error("Test alert failed. Check bot token/chat ID.")
 
 def fail_soft(title: str, e: Exception):
     st.error(f"{title}: {e}")

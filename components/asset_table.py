@@ -1,8 +1,6 @@
 import streamlit as st
 import pandas as pd
 
-from engine.symbols import symbol_meta
-
 
 def build_table(decisions, profiles):
     rows = []

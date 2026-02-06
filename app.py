@@ -136,6 +136,7 @@ def log_decisions(decisions, factors_by_symbol):
             "symbol": decision.symbol,
             "action": decision.action,
             "confidence": round(float(decision.confidence), 2),
+            "score": round(float(getattr(decision, "score", 0.0)), 2),
             "bias": decision.bias,
             "mode": decision.mode,
             "rr": factors.get("rr"),
@@ -174,6 +175,19 @@ def adapt_thresholds():
         thresholds["execution_confidence_min"] = min(
             9.2, thresholds["execution_confidence_min"] + 0.2
         )
+
+    outcomes = [entry for entry in recent if entry.get("outcome") in ("tp", "sl", "breakeven")]
+    if len(outcomes) >= 20:
+        wins = sum(1 for entry in outcomes if entry["outcome"] == "tp")
+        win_rate = wins / max(len(outcomes), 1)
+        if win_rate < 0.4:
+            thresholds["execution_confidence_min"] = min(
+                9.5, thresholds["execution_confidence_min"] + 0.2
+            )
+        elif win_rate > 0.6:
+            thresholds["execution_confidence_min"] = max(
+                7.8, thresholds["execution_confidence_min"] - 0.2
+            )
 
     thresholds["setup_score_threshold"] = min(
         thresholds["execution_score_threshold"] - 0.6,

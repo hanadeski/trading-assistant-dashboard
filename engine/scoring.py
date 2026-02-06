@@ -242,3 +242,4 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
             "rr": rr,
         }
         return Decision(symbol, bias, mode, confidence, action, "High-confidence setup: conditions align strongly.", trade_plan)
+

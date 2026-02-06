@@ -26,6 +26,71 @@ class Decision:
 def clamp(x: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, x))
 
+def build_score_breakdown(profile, factors: Dict) -> Dict[str, float]:
+    bias = factors.get("bias", "neutral")
+    session_boost = float(factors.get("session_boost", 0.0))
+    liquidity_ok = bool(factors.get("liquidity_ok", False))
+    structure_ok = bool(factors.get("structure_ok", False))
+    rr = float(factors.get("rr", 0.0))
+    volatility_risk = factors.get("volatility_risk", "normal")
+    news_risk = factors.get("news_risk", "none")
+    htf_bias = factors.get("htf_bias", "neutral")
+    regime = factors.get("regime", "range")
+    fvg_score = float(factors.get("fvg_score", 0.0))
+
+    bias_score = 2.0 if bias in ("bullish", "bearish") else 0.0
+    structure_score = 2.0 if structure_ok else 0.0
+    liquidity_score = 2.0 if liquidity_ok else 0.0
+    session_score = 2.0 * session_boost
+    rr_score = clamp((rr - 1.0), 0.0, 2.0)
+
+    volatility_penalty = 0.0
+    if volatility_risk == "high":
+        volatility_penalty = -0.5
+    elif volatility_risk == "extreme":
+        volatility_penalty = -1.5
+
+    news_penalty = 0.0
+    if news_risk == "against":
+        news_penalty = -2.0
+    elif news_risk == "near":
+        news_penalty = -0.5
+
+    fvg_penalty = 0.0
+    if fvg_score > 0.0:
+        fvg_penalty = -min(0.6, 0.2 + 0.6 * fvg_score)
+
+    htf_penalty = -1.0 if htf_bias not in ("neutral", bias) else 0.0
+    regime_penalty = -0.8 if regime == "range" else 0.0
+
+    score = (
+        bias_score
+        + structure_score
+        + liquidity_score
+        + session_score
+        + rr_score
+        + volatility_penalty
+        + news_penalty
+        + fvg_penalty
+        + htf_penalty
+        + regime_penalty
+    )
+    score = clamp(score, 0.0, 10.0)
+
+    return {
+        "bias_score": bias_score,
+        "structure_score": structure_score,
+        "liquidity_score": liquidity_score,
+        "session_score": session_score,
+        "rr_score": rr_score,
+        "volatility_penalty": volatility_penalty,
+        "news_penalty": news_penalty,
+        "fvg_penalty": fvg_penalty,
+        "htf_penalty": htf_penalty,
+        "regime_penalty": regime_penalty,
+        "total_score": score,
+    }
+
 def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
     bias = factors.get("bias", "neutral")
     session_boost = float(factors.get("session_boost", 0.0))
@@ -66,40 +131,8 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
     # ------------------------
     # Base scoring
     # ------------------------
-    score = 0.0
-    if bias in ("bullish", "bearish"):
-        score += 2.0
-    if structure_ok:
-        score += 2.0
-    if liquidity_ok:
-        score += 2.0
-    score += 2.0 * session_boost
-    score += clamp((rr - 1.0), 0.0, 2.0)
-
-    # ------------------------
-    # Risk penalties
-    # ------------------------
-    if volatility_risk == "high":
-        score -= 0.5
-    elif volatility_risk == "extreme":
-        score -= 1.5
-
-    if news_risk == "against":
-        score -= 2.0
-    elif news_risk == "near":
-        score -= 0.5
-
-    # --- soft de-risk adjustment (4.5A) ---
-    if fvg_score > 0.0:
-        score -= min(0.6, 0.2 + 0.6 * fvg_score)
-
-    if htf_bias not in ("neutral", bias):
-        score -= 1.0
-
-    if regime == "range":
-        score -= 0.8
-
-    score = clamp(score, 0.0, 10.0)
+    score_breakdown = build_score_breakdown(profile, factors)
+    score = score_breakdown["total_score"]
     # --- Confidence calibration ---
     # Ensure scores map cleanly to decision strength
     if score < 5.0:

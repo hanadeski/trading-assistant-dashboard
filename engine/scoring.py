@@ -35,6 +35,7 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
     volatility_risk = factors.get("volatility_risk", "normal")
     news_risk = factors.get("news_risk", "none")
     htf_bias = factors.get("htf_bias", "neutral")
+    regime = factors.get("regime", "range")
     setup_score_threshold = float(factors.get("setup_score_threshold", SETUP_SCORE_THRESHOLD))
     execution_score_threshold = float(
         factors.get("execution_score_threshold", EXECUTION_SCORE_THRESHOLD)
@@ -93,6 +94,9 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
     if htf_bias not in ("neutral", bias):
         score -= 1.0
 
+    if regime == "range":
+        score -= 0.8
+
     score = clamp(score, 0.0, 10.0)
     # --- Confidence calibration ---
     # Ensure scores map cleanly to decision strength
@@ -123,6 +127,8 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
 
     if htf_bias not in ("neutral", bias):
         commentary += " Higher-timeframe bias conflicts; wait for alignment."
+    if regime == "range":
+        commentary += " Range-bound regime detected; demand cleaner trend confirmation."
 
     # ------------------------
     
@@ -242,4 +248,3 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
             "rr": rr,
         }
         return Decision(symbol, bias, mode, confidence, action, "High-confidence setup: conditions align strongly.", trade_plan)
-

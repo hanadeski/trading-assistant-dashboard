@@ -81,7 +81,23 @@ def persist_state():
         "decision_log": st.session_state["decision_log"][-st.session_state["decision_log_max"] :],
         "adaptive_thresholds": st.session_state["adaptive_thresholds"],
     }
-    PERSIST_PATH.write_text(json.dumps(payload))
+    def _json_safe(value):
+        if isinstance(value, dict):
+            return {k: _json_safe(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [_json_safe(v) for v in value]
+        if isinstance(value, set):
+            return [_json_safe(v) for v in value]
+        if isinstance(value, Path):
+            return str(value)
+        if hasattr(value, "item") and callable(value.item):
+            try:
+                return value.item()
+            except Exception:
+                pass
+        return value
+
+    PERSIST_PATH.write_text(json.dumps(_json_safe(payload)))
 
 load_persisted_state()
 
@@ -452,4 +468,3 @@ else:
                 decisions, key=lambda d: d.confidence, reverse=True
             )
             render_ai_commentary(top[0] if top else None)
-

@@ -47,8 +47,18 @@ st.session_state.setdefault("ohlc_errors", {})           # dict[symbol] -> str
 st.session_state.setdefault("ohlc_used_fallback", set()) # set of symbols that used fallback this run
 st.session_state.setdefault("last_alerted_action", {})   # dict[symbol] -> str
 st.session_state.setdefault("last_alerted_ts", {})       # dict[symbol] -> int
+st.session_state.setdefault("decision_log", [])          # list[dict]
+st.session_state.setdefault(
+    "adaptive_thresholds",
+    {
+        "setup_score_threshold": 7.0,
+        "execution_score_threshold": 8.5,
+        "execution_confidence_min": 8.5,
+    },
+)
 
 ALERT_COOLDOWN_SECS = 60 * 30  # 30 minutes
+ALERT_CONFIDENCE_MIN = 8.5
 
 def maybe_send_trade_alerts(decisions):
     now = int(time.time())
@@ -58,7 +68,7 @@ def maybe_send_trade_alerts(decisions):
     for decision in decisions:
         if decision.action not in ("BUY NOW", "SELL NOW"):
             continue
-        if ALERT_HIGHCONF and decision.confidence < 9.0:
+        if ALERT_HIGHCONF and decision.confidence < ALERT_CONFIDENCE_MIN:
             continue
 
         last = last_action.get(decision.symbol)
@@ -71,6 +81,59 @@ def maybe_send_trade_alerts(decisions):
         if send_telegram_message(format_trade_alert(decision)):
             last_action[decision.symbol] = decision.action
             last_ts[decision.symbol] = now
+
+def log_decisions(decisions, factors_by_symbol):
+    now = int(time.time())
+    log = st.session_state["decision_log"]
+    for decision in decisions:
+        factors = factors_by_symbol.get(decision.symbol, {})
+        log.append({
+            "ts": now,
+            "symbol": decision.symbol,
+            "action": decision.action,
+            "confidence": round(float(decision.confidence), 2),
+            "bias": decision.bias,
+            "mode": decision.mode,
+            "rr": factors.get("rr"),
+            "volatility_risk": factors.get("volatility_risk"),
+            "liquidity_ok": factors.get("liquidity_ok"),
+            "structure_ok": factors.get("structure_ok"),
+            "fvg_score": factors.get("fvg_score"),
+            "htf_bias": factors.get("htf_bias"),
+        })
+
+def adapt_thresholds():
+    log = st.session_state["decision_log"]
+    if len(log) < 60:
+        return st.session_state["adaptive_thresholds"]
+
+    recent = log[-120:]
+    buy_sell = sum(1 for entry in recent if entry["action"] in ("BUY NOW", "SELL NOW"))
+    ratio = buy_sell / max(len(recent), 1)
+
+    thresholds = dict(st.session_state["adaptive_thresholds"])
+    if ratio < 0.05:
+        thresholds["execution_score_threshold"] = max(
+            7.5, thresholds["execution_score_threshold"] - 0.2
+        )
+        thresholds["execution_confidence_min"] = max(
+            7.8, thresholds["execution_confidence_min"] - 0.2
+        )
+    elif ratio > 0.15:
+        thresholds["execution_score_threshold"] = min(
+            9.2, thresholds["execution_score_threshold"] + 0.2
+        )
+        thresholds["execution_confidence_min"] = min(
+            9.2, thresholds["execution_confidence_min"] + 0.2
+        )
+
+    thresholds["setup_score_threshold"] = min(
+        thresholds["execution_score_threshold"] - 0.6,
+        thresholds["setup_score_threshold"],
+    )
+
+    st.session_state["adaptive_thresholds"] = thresholds
+    return thresholds
 # =========================
 # 10B — Safety / debug toggles
 # =========================
@@ -115,11 +178,15 @@ def build_snapshot():
         tr["lc"] = (low - close.shift()).abs()
         return tr.max(axis=1).rolling(n).mean()
 
+    thresholds = adapt_thresholds()
+
     for sym in symbols:
         try:
             df = fetch_ohlc(sym, interval="15m", period="5d")
+            htf_df = fetch_ohlc(sym, interval="1h", period="1mo")
         except Exception:
             df = None
+            htf_df = None
 
         if df is None or df.empty or len(df) < 60:
             factors_by_symbol[sym] = {
@@ -132,12 +199,16 @@ def build_snapshot():
                 "near_fvg": False,
                 "fvg_score": 0.0,
                 "df": df,
+                "htf_bias": "neutral",
                 "news_risk": "none",
                 "volatility_risk": "normal",
                 "entry": "TBD",
                 "stop": "TBD",
                 "tp1": "TBD",
                 "tp2": "TBD",
+                "setup_score_threshold": thresholds["setup_score_threshold"],
+                "execution_score_threshold": thresholds["execution_score_threshold"],
+                "execution_confidence_min": thresholds["execution_confidence_min"],
             }
             continue
 
@@ -152,6 +223,16 @@ def build_snapshot():
             bias = "bearish"
         else:
             bias = "neutral"
+
+        htf_bias = "neutral"
+        if htf_df is not None and not htf_df.empty and len(htf_df) >= 50:
+            htf_c = htf_df["close"]
+            htf_fast = ema(htf_c, 20)
+            htf_slow = ema(htf_c, 50)
+            if htf_fast.iloc[-1] > htf_slow.iloc[-1]:
+                htf_bias = "bullish"
+            elif htf_fast.iloc[-1] < htf_slow.iloc[-1]:
+                htf_bias = "bearish"
 
         slope = ema_fast.iloc[-1] - ema_fast.iloc[-10]
         structure_ok = abs(slope) > (c.iloc[-1] * 0.0002)
@@ -204,12 +285,16 @@ def build_snapshot():
             "near_fvg": False,
             "fvg_score": 0.0,
             "df": df,
+            "htf_bias": htf_bias,
             "news_risk": "none",
             "volatility_risk": volatility_risk,
             "entry": round(entry, 5),
             "stop": round(stop, 5) if isinstance(stop, float) else stop,
             "tp1": round(tp1, 5) if isinstance(tp1, float) else tp1,
             "tp2": round(tp2, 5) if isinstance(tp2, float) else tp2,
+            "setup_score_threshold": thresholds["setup_score_threshold"],
+            "execution_score_threshold": thresholds["execution_score_threshold"],
+            "execution_confidence_min": thresholds["execution_confidence_min"],
         }
 
     # --- Decisions ---
@@ -262,6 +347,7 @@ if st.button("🔄 Build Snapshot"):
 
                 update_portfolio(st.session_state, decisions, factors_by_symbol)
                 maybe_send_trade_alerts(decisions)
+                log_decisions(decisions, factors_by_symbol)
 
                 st.session_state.profiles = profiles
                 st.session_state.decisions = decisions
@@ -323,4 +409,3 @@ else:
                 decisions, key=lambda d: d.confidence, reverse=True
             )
             render_ai_commentary(top[0] if top else None)
-

@@ -303,3 +303,11 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
             "High-confidence setup: conditions align strongly.", trade_plan,
             score=score
         )
+
+    return Decision(
+        symbol, bias, mode, confidence,
+        "WAIT",
+        "No actionable setup yet; wait for confirmation.",
+        {},
+        score=score
+    )

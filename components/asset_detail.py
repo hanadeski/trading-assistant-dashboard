@@ -1,8 +1,10 @@
 # VERSION_MARKER_20260125_1
+import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 
 from data.live_data import fetch_ohlc
+from engine.scoring import build_score_breakdown
 
 def detect_fvgs(df, lookback=120):
     # Simple 3-candle FVG detection (ICT-style)
@@ -172,6 +174,28 @@ def render_asset_detail(profile, decision, factors=None):
     
     if hasattr(decision, "commentary"):
         st.write(decision.commentary)
+
+    st.markdown("### Score breakdown")
+    breakdown = build_score_breakdown(profile, factors)
+    breakdown_rows = [
+        ("Bias alignment", breakdown["bias_score"]),
+        ("Structure", breakdown["structure_score"]),
+        ("Liquidity", breakdown["liquidity_score"]),
+        ("Session boost", breakdown["session_score"]),
+        ("RR bonus", breakdown["rr_score"]),
+        ("Volatility penalty", breakdown["volatility_penalty"]),
+        ("News penalty", breakdown["news_penalty"]),
+        ("FVG penalty", breakdown["fvg_penalty"]),
+        ("HTF conflict penalty", breakdown["htf_penalty"]),
+        ("Range regime penalty", breakdown["regime_penalty"]),
+    ]
+    breakdown_df = pd.DataFrame(breakdown_rows, columns=["Component", "Contribution"])
+    breakdown_df["Contribution"] = breakdown_df["Contribution"].map(lambda v: f"{v:+.2f}")
+    st.dataframe(breakdown_df, hide_index=True, use_container_width=True)
+    st.caption(
+        f"Total score: {breakdown['total_score']:.2f} • "
+        f"Confidence: {float(decision.confidence):.2f}/10"
+    )
     
     # ------------------------
     # Debug (internal)

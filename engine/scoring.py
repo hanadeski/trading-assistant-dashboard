@@ -3,9 +3,9 @@ from typing import Dict
 import pandas as pd
 from engine.fvg import detect_fvgs
 
-SETUP_SCORE_THRESHOLD = 7.0
-EXECUTION_SCORE_THRESHOLD = 8.5
-EXECUTION_CONFIDENCE_MIN = 8.5
+SETUP_SCORE_THRESHOLD = 6.6
+EXECUTION_SCORE_THRESHOLD = 7.8
+EXECUTION_CONFIDENCE_MIN = 7.8
 
 @dataclass
 class Decision:

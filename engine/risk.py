@@ -66,34 +66,16 @@ def apply_sizing(decision, profile, factors: Dict[str, Any], default_equity: flo
 
     equity = _get_equity(profile, default_equity=default_equity)
     confidence = float(getattr(decision, "confidence", 0.0))
+    score = float(getattr(decision, "score", confidence))
 
     base_risk = _mode_base_risk_pct(getattr(decision, "mode", "conservative"))
     conf_mult = clamp((confidence - 5.0) / 5.0, 0.0, 1.0)  # 5->0, 10->1
+    score_mult = clamp(score / 10.0, 0.6, 1.1)
     vol_mult = _volatility_mult(factors.get("volatility_risk", "normal"))
 
-    risk_pct = base_risk * conf_mult * vol_mult
+    risk_pct = base_risk * conf_mult * score_mult * vol_mult
     # hard safety cap
     risk_pct = clamp(risk_pct, 0.0, 0.01)  # max 1% equity
-    # -----------------------------
-    # Size tiers (Small/Medium/Large)
-    # -----------------------------
-    regime = factors.get("regime", "trend")
-    vol = factors.get("volatility_risk", "normal")
-    liquidity_ok = bool(factors.get("liquidity_ok", False))
-    
-    # Hard block tiers
-    if regime in ("no_data", "chop", "extreme_vol") or vol == "extreme":
-        size_tier = "OFF"
-    elif vol == "high":
-        size_tier = "SMALL"
-    else:
-        # Use confidence + liquidity to scale up
-        if confidence >= 9.0 and liquidity_ok and regime == "trend":
-            size_tier = "LARGE"
-        elif confidence >= 7.5:
-            size_tier = "MEDIUM"
-        else:
-            size_tier = "SMALL"
 
     risk_amt = equity * risk_pct
     size = (risk_amt / stop_dist) if stop_dist else 0.0
@@ -116,7 +98,6 @@ def apply_sizing(decision, profile, factors: Dict[str, Any], default_equity: flo
         "conf_mult": round(conf_mult, 4),
         "vol_mult": vol_mult,
         "stop_dist": stop_dist,
-        "size_tier": size_tier,
     }
 
     # Use dataclasses.replace so we don't have to rebuild Decision() calls everywhere

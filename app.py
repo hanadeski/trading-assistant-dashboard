@@ -1,9 +1,8 @@
 # force redeploy
 import sys
 import time
-from pathlib import Path
-import json
 from datetime import datetime, timezone
+from pathlib import Path
 sys.path.append(str(Path(__file__).parent))
 import streamlit as st
 import pandas as pd
@@ -11,7 +10,6 @@ from engine.profiles import get_profiles
 from engine.decision_layer import run_decisions
 from engine.fvg import compute_fvg_context
 from engine.portfolio import init_portfolio_state, update_portfolio
-from streamlit_autorefresh import st_autorefresh
 
 
 # live data import
@@ -50,61 +48,22 @@ st.session_state.setdefault("ohlc_errors", {})           # dict[symbol] -> str
 st.session_state.setdefault("ohlc_used_fallback", set()) # set of symbols that used fallback this run
 st.session_state.setdefault("last_alerted_action", {})   # dict[symbol] -> str
 st.session_state.setdefault("last_alerted_ts", {})       # dict[symbol] -> int
-st.session_state.setdefault("decision_log", [])          # list[dict]
-st.session_state.setdefault(
-    "adaptive_thresholds",
-    {
-        "setup_score_threshold": 6.6,
-        "execution_score_threshold": 7.8,
-        "execution_confidence_min": 7.8,
-    },
-)
-st.session_state.setdefault("decision_log_max", 1000)
-
-PERSIST_PATH = Path(__file__).parent / "state" / "decision_store.json"
-
-def load_persisted_state():
-    if not PERSIST_PATH.exists():
-        return
-    try:
-        payload = json.loads(PERSIST_PATH.read_text())
-    except Exception:
-        return
-    if isinstance(payload, dict):
-        log = payload.get("decision_log")
-        thresholds = payload.get("adaptive_thresholds")
-        if isinstance(log, list):
-            st.session_state["decision_log"] = log[-st.session_state["decision_log_max"] :]
-        if isinstance(thresholds, dict):
-            st.session_state["adaptive_thresholds"].update(thresholds)
-
-def persist_state():
-    payload = {
-        "decision_log": st.session_state["decision_log"][-st.session_state["decision_log_max"] :],
-        "adaptive_thresholds": st.session_state["adaptive_thresholds"],
-    }
-    def _json_safe(value):
-        if isinstance(value, dict):
-            return {k: _json_safe(v) for k, v in value.items()}
-        if isinstance(value, list):
-            return [_json_safe(v) for v in value]
-        if isinstance(value, set):
-            return [_json_safe(v) for v in value]
-        if isinstance(value, Path):
-            return str(value)
-        if hasattr(value, "item") and callable(value.item):
-            try:
-                return value.item()
-            except Exception:
-                pass
-        return value
-
-    PERSIST_PATH.write_text(json.dumps(_json_safe(payload)))
-
-load_persisted_state()
 
 ALERT_COOLDOWN_SECS = 60 * 20  # 20 minutes
 ALERT_CONFIDENCE_MIN = 8.0
+# =========================
+# 10B — Safety / debug toggles
+# =========================
+with st.sidebar.expander("⚙️ Safety toggles", expanded=False):
+    DEBUG = st.toggle("DEBUG (show full exceptions)", value=False)
+    ALERT_MODE3 = st.toggle("Telegram Mode 3 (opens + closes)", value=True)
+    ALERT_HIGHCONF = st.toggle("High-confidence BUY/SELL alerts", value=True)
+    LIVE_DATA = st.toggle("Live data (yfinance)", value=True)
+
+def fail_soft(title: str, e: Exception):
+    st.error(f"{title}: {e}")
+    if DEBUG:
+        st.exception(e)
 
 def maybe_send_trade_alerts(decisions):
     now = int(time.time())
@@ -127,103 +86,6 @@ def maybe_send_trade_alerts(decisions):
         if send_telegram_message(format_trade_alert(decision)):
             last_action[decision.symbol] = decision.action
             last_ts[decision.symbol] = now
-
-def log_decisions(decisions, factors_by_symbol):
-    now = int(time.time())
-    log = st.session_state["decision_log"]
-    for decision in decisions:
-        factors = factors_by_symbol.get(decision.symbol, {})
-        log.append({
-            "ts": now,
-            "symbol": decision.symbol,
-            "action": decision.action,
-            "confidence": round(float(decision.confidence), 2),
-            "score": round(float(getattr(decision, "score", 0.0)), 2),
-            "bias": decision.bias,
-            "mode": decision.mode,
-            "rr": factors.get("rr"),
-            "volatility_risk": factors.get("volatility_risk"),
-            "liquidity_ok": factors.get("liquidity_ok"),
-            "structure_ok": factors.get("structure_ok"),
-            "fvg_score": factors.get("fvg_score"),
-            "htf_bias": factors.get("htf_bias"),
-            "outcome": None,
-        })
-    if len(log) > st.session_state["decision_log_max"]:
-        st.session_state["decision_log"] = log[-st.session_state["decision_log_max"] :]
-    persist_state()
-
-def adapt_thresholds():
-    log = st.session_state["decision_log"]
-    if len(log) < 60:
-        return st.session_state["adaptive_thresholds"]
-
-    recent = log[-120:]
-    buy_sell = sum(1 for entry in recent if entry["action"] in ("BUY NOW", "SELL NOW"))
-    ratio = buy_sell / max(len(recent), 1)
-
-    thresholds = dict(st.session_state["adaptive_thresholds"])
-    if ratio < 0.05:
-        thresholds["execution_score_threshold"] = max(
-            7.5, thresholds["execution_score_threshold"] - 0.2
-        )
-        thresholds["execution_confidence_min"] = max(
-            7.8, thresholds["execution_confidence_min"] - 0.2
-        )
-    elif ratio > 0.15:
-        thresholds["execution_score_threshold"] = min(
-            9.2, thresholds["execution_score_threshold"] + 0.2
-        )
-        thresholds["execution_confidence_min"] = min(
-            9.2, thresholds["execution_confidence_min"] + 0.2
-        )
-
-    outcomes = [entry for entry in recent if entry.get("outcome") in ("tp", "sl", "breakeven")]
-    if len(outcomes) >= 20:
-        wins = sum(1 for entry in outcomes if entry["outcome"] == "tp")
-        win_rate = wins / max(len(outcomes), 1)
-        if win_rate < 0.4:
-            thresholds["execution_confidence_min"] = min(
-                9.5, thresholds["execution_confidence_min"] + 0.2
-            )
-        elif win_rate > 0.6:
-            thresholds["execution_confidence_min"] = max(
-                7.8, thresholds["execution_confidence_min"] - 0.2
-            )
-
-    thresholds["setup_score_threshold"] = min(
-        thresholds["execution_score_threshold"] - 0.6,
-        thresholds["setup_score_threshold"],
-    )
-
-    st.session_state["adaptive_thresholds"] = thresholds
-    persist_state()
-    return thresholds
-
-def record_trade_outcome(symbol: str, outcome: str):
-    """
-    Stub for manual outcome tracking (e.g., 'tp', 'sl', 'breakeven').
-    """
-    for entry in reversed(st.session_state["decision_log"]):
-        if entry.get("symbol") == symbol and entry.get("outcome") is None:
-            entry["outcome"] = outcome
-            break
-    persist_state()
-# =========================
-# 10B — Safety / debug toggles
-# =========================
-with st.sidebar.expander("⚙️ Safety toggles", expanded=False):
-    DEBUG = st.toggle("DEBUG (show full exceptions)", value=False)
-    ALERT_MODE3 = st.toggle("Telegram Mode 3 (opens + closes)", value=True)
-    ALERT_HIGHCONF = st.toggle("High-confidence BUY/SELL alerts", value=True)
-    LIVE_DATA = st.toggle("Live data (yfinance)", value=True)
-    AUTO_REFRESH = st.toggle("Auto-refresh snapshot", value=False)
-    REFRESH_SECONDS = st.slider("Refresh interval (seconds)", 30, 600, 120, step=30)
-
-def fail_soft(title: str, e: Exception):
-    st.error(f"{title}: {e}")
-    if DEBUG:
-        st.exception(e)
 
 # 12 – Snapshot Cache (12.1 → 12.5)
 # =========================
@@ -255,14 +117,6 @@ def build_snapshot():
         tr["lc"] = (low - close.shift()).abs()
         return tr.max(axis=1).rolling(n).mean()
 
-    def market_regime(close_series):
-        if close_series is None or close_series.empty or len(close_series) < 55:
-            return "range"
-        ema_mid = close_series.ewm(span=50, adjust=False).mean()
-        slope = ema_mid.iloc[-1] - ema_mid.iloc[-10]
-        slope_pct = abs(slope) / close_series.iloc[-1]
-        return "trend" if slope_pct > 0.0006 else "range"
-
     def session_name(now_utc: datetime) -> str:
         hour = now_utc.hour
         if 12 <= hour < 16:
@@ -273,16 +127,13 @@ def build_snapshot():
             return "New York"
         return "Asia / Off-hours"
 
-    thresholds = adapt_thresholds()
     session_label = session_name(datetime.now(timezone.utc))
 
     for sym in symbols:
         try:
             df = fetch_ohlc(sym, interval="15m", period="5d")
-            htf_df = fetch_ohlc(sym, interval="1h", period="1mo")
         except Exception:
             df = None
-            htf_df = None
 
         if df is None or df.empty or len(df) < 60:
             factors_by_symbol[sym] = {
@@ -291,12 +142,10 @@ def build_snapshot():
                 "structure_ok": False,
                 "liquidity_ok": False,
                 "certified": False,
-                "regime": "range",
                 "rr": 0.0,
                 "near_fvg": False,
                 "fvg_score": 0.0,
                 "df": df,
-                "htf_bias": "neutral",
                 "session_name": session_label,
                 "news_risk": "none",
                 "volatility_risk": "normal",
@@ -304,9 +153,6 @@ def build_snapshot():
                 "stop": "TBD",
                 "tp1": "TBD",
                 "tp2": "TBD",
-                "setup_score_threshold": thresholds["setup_score_threshold"],
-                "execution_score_threshold": thresholds["execution_score_threshold"],
-                "execution_confidence_min": thresholds["execution_confidence_min"],
             }
             continue
 
@@ -321,18 +167,6 @@ def build_snapshot():
             bias = "bearish"
         else:
             bias = "neutral"
-
-        regime = market_regime(c)
-
-        htf_bias = "neutral"
-        if htf_df is not None and not htf_df.empty and len(htf_df) >= 50:
-            htf_c = htf_df["close"]
-            htf_fast = ema(htf_c, 20)
-            htf_slow = ema(htf_c, 50)
-            if htf_fast.iloc[-1] > htf_slow.iloc[-1]:
-                htf_bias = "bullish"
-            elif htf_fast.iloc[-1] < htf_slow.iloc[-1]:
-                htf_bias = "bearish"
 
         slope = ema_fast.iloc[-1] - ema_fast.iloc[-10]
         structure_ok = abs(slope) > (c.iloc[-1] * 0.0002)
@@ -381,12 +215,10 @@ def build_snapshot():
             "structure_ok": structure_ok,
             "liquidity_ok": liquidity_ok,
             "certified": certified,
-            "regime": regime,
             "rr": rr,
             "near_fvg": False,
             "fvg_score": 0.0,
             "df": df,
-            "htf_bias": htf_bias,
             "session_name": session_label,
             "news_risk": "none",
             "volatility_risk": volatility_risk,
@@ -394,9 +226,6 @@ def build_snapshot():
             "stop": round(stop, 5) if isinstance(stop, float) else stop,
             "tp1": round(tp1, 5) if isinstance(tp1, float) else tp1,
             "tp2": round(tp2, 5) if isinstance(tp2, float) else tp2,
-            "setup_score_threshold": thresholds["setup_score_threshold"],
-            "execution_score_threshold": thresholds["execution_score_threshold"],
-            "execution_confidence_min": thresholds["execution_confidence_min"],
         }
 
     # --- Decisions ---
@@ -404,3 +233,110 @@ def build_snapshot():
     decisions_by_symbol = {d.symbol: d for d in decisions}
 
     return profiles, symbols, factors_by_symbol, decisions, decisions_by_symbol
+
+# =========================================================
+# UI — Always render homepage (never blank)
+# =========================================================
+
+# Ensure profiles always exist (even before snapshot)
+profiles = st.session_state.get("profiles") or get_profiles()
+st.session_state.profiles = profiles
+
+decisions = st.session_state.get("decisions", [])
+factors_by_symbol = st.session_state.get("factors_by_symbol", {})
+decisions_by_symbol = st.session_state.get("decisions_by_symbol", {})
+
+# ---------------------------------------------------------
+# Header
+# ---------------------------------------------------------
+st.title("Trading Assistant")
+st.caption("Booting… if this takes long, live data may be rate-limited.")
+st.divider()
+
+# ---------------------------------------------------------
+# Snapshot state
+# ---------------------------------------------------------
+if "snapshot_ready" not in st.session_state:
+    st.session_state.snapshot_ready = False
+
+# ---------------------------------------------------------
+# Snapshot button
+# ---------------------------------------------------------
+if st.button("🔄 Build Snapshot"):
+    if not LIVE_DATA:
+        st.warning("Live data is OFF. Enable it in Safety toggles.")
+    else:
+        with st.spinner("Building snapshot (live data)..."):
+            try:
+                (
+                    profiles,
+                    symbols,
+                    factors_by_symbol,
+                    decisions,
+                    decisions_by_symbol,
+                ) = build_snapshot()
+
+                update_portfolio(st.session_state, decisions, factors_by_symbol)
+
+                st.session_state.profiles = profiles
+                st.session_state.decisions = decisions
+                st.session_state.factors_by_symbol = factors_by_symbol
+                st.session_state.decisions_by_symbol = decisions_by_symbol
+                st.session_state.snapshot_ready = True
+
+                maybe_send_trade_alerts(decisions)
+
+                st.success("Snapshot built ✅")
+
+            except Exception as e:
+                st.session_state.snapshot_ready = False
+                fail_soft("Snapshot build failed", e)
+
+# ---------------------------------------------------------
+# Stable top UI (ALWAYS visible)
+# ---------------------------------------------------------
+try:
+    render_portfolio_panel(st.session_state)
+except Exception as e:
+    fail_soft("Portfolio panel failed", e)
+
+try:
+    render_top_bar(news_flag="Live prices (v1)")
+except Exception as e:
+    fail_soft("Top bar failed", e)
+
+st.divider()
+
+# ---------------------------------------------------------
+# Homepage body
+# ---------------------------------------------------------
+if not st.session_state.snapshot_ready:
+    st.info(
+        "Click **Build Snapshot** to load live data. "
+        "If Yahoo is rate-limiting, wait a minute and try again."
+    )
+    render_asset_table([], profiles)
+
+else:
+    selected = st.session_state.get("selected_symbol")
+
+    if selected:
+        pmap = {p.symbol: p for p in profiles}
+        render_asset_detail(
+            pmap.get(selected),
+            decisions_by_symbol.get(selected),
+            factors_by_symbol.get(selected, {}),
+        )
+        render_ai_commentary(decisions_by_symbol.get(selected))
+
+    else:
+        left, right = st.columns([0.7, 0.3], gap="large")
+
+        with left:
+            render_asset_table(decisions, profiles)
+
+        with right:
+            top = sorted(
+                decisions, key=lambda d: d.confidence, reverse=True
+            )
+            render_ai_commentary(top[0] if top else None)

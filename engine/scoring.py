@@ -46,9 +46,9 @@ def build_score_breakdown(profile, factors: Dict) -> Dict[str, float]:
 
     volatility_penalty = 0.0
     if volatility_risk == "high":
-        volatility_penalty = -0.3
+        volatility_penalty = -0.2
     elif volatility_risk == "extreme":
-        volatility_penalty = -1.2
+        volatility_penalty = -0.6
 
     news_penalty = 0.0
     if news_risk == "against":
@@ -56,12 +56,8 @@ def build_score_breakdown(profile, factors: Dict) -> Dict[str, float]:
     elif news_risk == "near":
         news_penalty = -0.5
 
-    fvg_penalty = 0.0
-    if fvg_score > 0.0:
-        fvg_penalty = -min(0.6, 0.2 + 0.6 * fvg_score)
-
     htf_penalty = -1.0 if htf_bias not in ("neutral", bias) else 0.0
-    regime_penalty = -0.5 if regime == "range" else 0.0
+    regime_penalty = 0.0
 
     score = (
         bias_score
@@ -71,7 +67,6 @@ def build_score_breakdown(profile, factors: Dict) -> Dict[str, float]:
         + rr_score
         + volatility_penalty
         + news_penalty
-        + fvg_penalty
         + htf_penalty
         + regime_penalty
     )
@@ -85,7 +80,6 @@ def build_score_breakdown(profile, factors: Dict) -> Dict[str, float]:
         "rr_score": rr_score,
         "volatility_penalty": volatility_penalty,
         "news_penalty": news_penalty,
-        "fvg_penalty": fvg_penalty,
         "htf_penalty": htf_penalty,
         "regime_penalty": regime_penalty,
         "total_score": score,

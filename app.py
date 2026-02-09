@@ -48,6 +48,7 @@ st.session_state.setdefault("ohlc_errors", {})           # dict[symbol] -> str
 st.session_state.setdefault("ohlc_used_fallback", set()) # set of symbols that used fallback this run
 st.session_state.setdefault("last_alerted_action", {})   # dict[symbol] -> str
 st.session_state.setdefault("last_alerted_ts", {})       # dict[symbol] -> int
+st.session_state.setdefault("last_snapshot_ts", 0)       # unix seconds
 ALERT_COOLDOWN_SECS = 60 * 20  # 20 minutes
 ALERT_CONFIDENCE_MIN = 8.0
 # =========================
@@ -259,37 +260,43 @@ if "snapshot_ready" not in st.session_state:
     st.session_state.snapshot_ready = False
 
 # ---------------------------------------------------------
-# Snapshot button
+# Auto snapshot (always on; no manual toggle)
 # ---------------------------------------------------------
-if st.button("🔄 Build Snapshot"):
-    if not LIVE_DATA:
-        st.warning("Live data is OFF. Enable it in Safety toggles.")
-    else:
-        with st.spinner("Building snapshot (live data)..."):
-            try:
-                (
-                    profiles,
-                    symbols,
-                    factors_by_symbol,
-                    decisions,
-                    decisions_by_symbol,
-                ) = build_snapshot()
+SNAPSHOT_INTERVAL_SECS = 1
+now = int(time.time())
+should_snapshot = (
+    LIVE_DATA
+    and (not st.session_state.snapshot_ready
+         or (now - st.session_state.last_snapshot_ts) >= SNAPSHOT_INTERVAL_SECS)
+)
 
-                update_portfolio(st.session_state, decisions, factors_by_symbol)
+if should_snapshot:
+    with st.spinner("Building snapshot (live data)..."):
+        try:
+            (
+                profiles,
+                symbols,
+                factors_by_symbol,
+                decisions,
+                decisions_by_symbol,
+            ) = build_snapshot()
 
-                st.session_state.profiles = profiles
-                st.session_state.decisions = decisions
-                st.session_state.factors_by_symbol = factors_by_symbol
-                st.session_state.decisions_by_symbol = decisions_by_symbol
-                st.session_state.snapshot_ready = True
+            update_portfolio(st.session_state, decisions, factors_by_symbol)
 
-                maybe_send_trade_alerts(decisions)
+            st.session_state.profiles = profiles
+            st.session_state.decisions = decisions
+            st.session_state.factors_by_symbol = factors_by_symbol
+            st.session_state.decisions_by_symbol = decisions_by_symbol
+            st.session_state.snapshot_ready = True
+            st.session_state.last_snapshot_ts = now
 
-                st.success("Snapshot built ✅")
+            maybe_send_trade_alerts(decisions)
 
-            except Exception as e:
-                st.session_state.snapshot_ready = False
-                fail_soft("Snapshot build failed", e)
+        except Exception as e:
+            st.session_state.snapshot_ready = False
+            fail_soft("Snapshot build failed", e)
+elif not LIVE_DATA:
+    st.warning("Live data is OFF. Enable it in Safety toggles.")
 
 # ---------------------------------------------------------
 # Stable top UI (ALWAYS visible)

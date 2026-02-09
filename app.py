@@ -48,7 +48,6 @@ st.session_state.setdefault("ohlc_errors", {})           # dict[symbol] -> str
 st.session_state.setdefault("ohlc_used_fallback", set()) # set of symbols that used fallback this run
 st.session_state.setdefault("last_alerted_action", {})   # dict[symbol] -> str
 st.session_state.setdefault("last_alerted_ts", {})       # dict[symbol] -> int
-
 ALERT_COOLDOWN_SECS = 60 * 20  # 20 minutes
 ALERT_CONFIDENCE_MIN = 8.0
 # =========================

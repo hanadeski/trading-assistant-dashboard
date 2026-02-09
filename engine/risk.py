@@ -41,6 +41,15 @@ def _volatility_mult(vol_risk: str) -> float:
         return 0.25
     return 1.0
 
+def _confidence_mult(confidence: float) -> float:
+    if confidence < 5.0:
+        return 0.0
+    if confidence < 7.0:
+        return 0.6
+    if confidence < 7.8:
+        return 0.9
+    return 1.0
+
 def apply_sizing(decision, profile, factors: Dict[str, Any], default_equity: float = 10000.0):
     """
     Adds:
@@ -69,7 +78,7 @@ def apply_sizing(decision, profile, factors: Dict[str, Any], default_equity: flo
     score = float(getattr(decision, "score", confidence))
 
     base_risk = _mode_base_risk_pct(getattr(decision, "mode", "conservative"))
-    conf_mult = clamp((confidence - 5.0) / 5.0, 0.0, 1.0)  # 5->0, 10->1
+    conf_mult = _confidence_mult(confidence)
     score_mult = clamp(score / 10.0, 0.6, 1.1)
     vol_mult = _volatility_mult(factors.get("volatility_risk", "normal"))
 

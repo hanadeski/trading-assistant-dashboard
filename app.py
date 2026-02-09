@@ -3,6 +3,7 @@ import sys
 import time
 from pathlib import Path
 import json
+from datetime import datetime, timezone
 sys.path.append(str(Path(__file__).parent))
 import streamlit as st
 import pandas as pd
@@ -102,7 +103,7 @@ def persist_state():
 
 load_persisted_state()
 
-ALERT_COOLDOWN_SECS = 60 * 30  # 30 minutes
+ALERT_COOLDOWN_SECS = 60 * 20  # 20 minutes
 ALERT_CONFIDENCE_MIN = 8.0
 
 def maybe_send_trade_alerts(decisions):
@@ -261,7 +262,19 @@ def build_snapshot():
         slope = ema_mid.iloc[-1] - ema_mid.iloc[-10]
         slope_pct = abs(slope) / close_series.iloc[-1]
         return "trend" if slope_pct > 0.0006 else "range"
+
+    def session_name(now_utc: datetime) -> str:
+        hour = now_utc.hour
+        if 12 <= hour < 16:
+            return "London + NY Overlap"
+        if 7 <= hour < 12:
+            return "London"
+        if 12 <= hour < 21:
+            return "New York"
+        return "Asia / Off-hours"
+
     thresholds = adapt_thresholds()
+    session_label = session_name(datetime.now(timezone.utc))
 
     for sym in symbols:
         try:
@@ -284,6 +297,7 @@ def build_snapshot():
                 "fvg_score": 0.0,
                 "df": df,
                 "htf_bias": "neutral",
+                "session_name": session_label,
                 "news_risk": "none",
                 "volatility_risk": "normal",
                 "entry": "TBD",
@@ -373,6 +387,7 @@ def build_snapshot():
             "fvg_score": 0.0,
             "df": df,
             "htf_bias": htf_bias,
+            "session_name": session_label,
             "news_risk": "none",
             "volatility_risk": volatility_risk,
             "entry": round(entry, 5),
@@ -389,123 +404,3 @@ def build_snapshot():
     decisions_by_symbol = {d.symbol: d for d in decisions}
 
     return profiles, symbols, factors_by_symbol, decisions, decisions_by_symbol
-
-# =========================================================
-# UI — Always render homepage (never blank)
-# =========================================================
-
-# Ensure profiles always exist (even before snapshot)
-profiles = st.session_state.get("profiles") or get_profiles()
-st.session_state.profiles = profiles
-
-decisions = st.session_state.get("decisions", [])
-factors_by_symbol = st.session_state.get("factors_by_symbol", {})
-decisions_by_symbol = st.session_state.get("decisions_by_symbol", {})
-st.session_state.pop("asset_select", None)
-if not st.session_state.get("selected_from_click"):
-    st.session_state.pop("selected_symbol", None)
-st.session_state["selected_from_click"] = False
-
-# ---------------------------------------------------------
-# Header
-# ---------------------------------------------------------
-st.title("Trading Assistant")
-st.caption("Booting… if this takes long, live data may be rate-limited.")
-st.divider()
-
-# ---------------------------------------------------------
-# Snapshot state
-# ---------------------------------------------------------
-if "snapshot_ready" not in st.session_state:
-    st.session_state.snapshot_ready = False
-
-# ---------------------------------------------------------
-# Snapshot button
-# ---------------------------------------------------------
-if AUTO_REFRESH:
-    st_autorefresh(interval=REFRESH_SECONDS * 1000, key="snapshot_autorefresh")
-
-def run_snapshot():
-    if not LIVE_DATA:
-        st.warning("Live data is OFF. Enable it in Safety toggles.")
-        return
-    with st.spinner("Building snapshot (live data)..."):
-        try:
-            (
-                profiles,
-                symbols,
-                factors_by_symbol,
-                decisions,
-                decisions_by_symbol,
-            ) = build_snapshot()
-
-            update_portfolio(st.session_state, decisions, factors_by_symbol)
-            maybe_send_trade_alerts(decisions)
-            log_decisions(decisions, factors_by_symbol)
-
-            st.session_state.profiles = profiles
-            st.session_state.decisions = decisions
-            st.session_state.factors_by_symbol = factors_by_symbol
-            st.session_state.decisions_by_symbol = decisions_by_symbol
-            st.session_state.snapshot_ready = True
-
-            st.success("Snapshot built ✅")
-
-        except Exception as e:
-            st.session_state.snapshot_ready = False
-            fail_soft("Snapshot build failed", e)
-
-if st.button("🔄 Build Snapshot"):
-    run_snapshot()
-elif AUTO_REFRESH and LIVE_DATA:
-    last_auto = st.session_state.get("last_auto_snapshot_ts", 0)
-    now = time.time()
-    if now - last_auto >= max(REFRESH_SECONDS - 1, 1):
-        st.session_state["last_auto_snapshot_ts"] = now
-        run_snapshot()
-
-# ---------------------------------------------------------
-# Stable top UI (ALWAYS visible)
-# ---------------------------------------------------------
-try:
-    render_portfolio_panel(st.session_state)
-except Exception as e:
-    fail_soft("Portfolio panel failed", e)
-
-try:
-    render_top_bar(news_flag="Live prices (v1)")
-except Exception as e:
-    fail_soft("Top bar failed", e)
-
-st.divider()
-
-# ---------------------------------------------------------
-# Homepage body
-# ---------------------------------------------------------
-if not st.session_state.snapshot_ready:
-    st.info(
-        "Click **Build Snapshot** to load live data. "
-        "If Yahoo is rate-limiting, wait a minute and try again."
-    )
-    render_asset_table([], profiles)
-
-else:
-    selected = st.session_state.get("selected_symbol")
-
-    left, right = st.columns([0.7, 0.3], gap="large")
-
-    with left:
-        render_asset_table(decisions, profiles)
-        if selected:
-            pmap = {p.symbol: p for p in profiles}
-            render_asset_detail(
-                pmap.get(selected),
-                decisions_by_symbol.get(selected),
-                factors_by_symbol.get(selected, {}),
-            )
-
-    with right:
-        top = sorted(
-            decisions, key=lambda d: d.confidence, reverse=True
-        )
-        render_ai_commentary(top[0] if top else None)

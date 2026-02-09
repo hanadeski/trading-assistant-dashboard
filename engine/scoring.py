@@ -38,17 +38,17 @@ def build_score_breakdown(profile, factors: Dict) -> Dict[str, float]:
     regime = factors.get("regime", "range")
     fvg_score = float(factors.get("fvg_score", 0.0))
 
-    bias_score = 2.0 if bias in ("bullish", "bearish") else 0.0
-    structure_score = 2.0 if structure_ok else 0.0
-    liquidity_score = 2.0 if liquidity_ok else 0.0
+    bias_score = 2.5 if bias in ("bullish", "bearish") else 0.0
+    structure_score = 2.5 if structure_ok else 0.0
+    liquidity_score = 2.5 if liquidity_ok else 0.0
     session_score = 2.0 * session_boost
-    rr_score = clamp((rr - 1.0), 0.0, 2.0)
+    rr_score = clamp((rr - 1.0), 0.0, 3.0)
 
     volatility_penalty = 0.0
     if volatility_risk == "high":
-        volatility_penalty = -0.5
+        volatility_penalty = -0.3
     elif volatility_risk == "extreme":
-        volatility_penalty = -1.5
+        volatility_penalty = -1.2
 
     news_penalty = 0.0
     if news_risk == "against":
@@ -61,7 +61,7 @@ def build_score_breakdown(profile, factors: Dict) -> Dict[str, float]:
         fvg_penalty = -min(0.6, 0.2 + 0.6 * fvg_score)
 
     htf_penalty = -1.0 if htf_bias not in ("neutral", bias) else 0.0
-    regime_penalty = -0.8 if regime == "range" else 0.0
+    regime_penalty = -0.5 if regime == "range" else 0.0
 
     score = (
         bias_score
@@ -124,9 +124,11 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
     near_fvg = bool(factors.get("near_fvg", False))
     fvg_score = float(factors.get("fvg_score", 0.0))
     fvg_gate = near_fvg and (fvg_score >= 0.6)
-        # --- RR thresholds ---
+    # --- RR thresholds ---
     rr_min = profile.rr_min
     rr_min_cert = profile.certified_rr_min
+    session_name = str(factors.get("session_name", ""))
+    rr_required = 1.8 if "asia" in session_name.lower() else 2.0
 
     # ------------------------
     # Base scoring
@@ -166,8 +168,6 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
         commentary += " Range-bound regime detected; demand cleaner trend confirmation."
 
     # ------------------------
-    
-    # ------------------------
     # Decision ladder
     # ------------------------
     if score < 5.0:
@@ -176,11 +176,38 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
             "No edge: choppy or mid-range conditions.", {},
             score=score
         )
-    
-        # -----------------------------
+
+    core_rules_ok = (
+        bias in ("bullish", "bearish")
+        and structure_ok
+        and liquidity_ok
+        and rr >= rr_required
+        and news_risk != "against"
+    )
+
+    if core_rules_ok:
+        action = "BUY NOW" if bias == "bullish" else "SELL NOW"
+        trade_plan = {
+            "entry": factors.get("entry", "TBD"),
+            "stop": factors.get("stop", "TBD"),
+            "tp1": factors.get("tp1", "TBD"),
+            "tp2": factors.get("tp2", "TBD"),
+            "rr": rr,
+        }
+        return Decision(
+            symbol,
+            bias,
+            mode,
+            confidence,
+            action,
+            "Core setup aligned (bias/structure/liquidity/RR).",
+            trade_plan,
+            score=score,
+        )
+
+    # -----------------------------
     # Decision ladder (Balanced)
     # -----------------------------
-    
     # 1) Low score = WATCH
     if score < setup_score_threshold:
         return Decision(
@@ -190,7 +217,7 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
             {},
             score=score
         )
-    
+
     # 2) Mid score = WAIT (only if structure + RR are decent), else WATCH
     if score < execution_score_threshold:
         # Balanced: require RR + structure for "WAIT"
@@ -202,7 +229,7 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
                 {},
                 score=score
             )
-    
+
         return Decision(
             symbol, bias, mode, confidence,
             "WATCH",
@@ -210,20 +237,19 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
             {},
             score=score
         )
-    
-    
+
     # 3) High score zone: decide whether we can trigger
     mode = "aggressive" if certified else "balanced"
-    
+
     # RR gate: use rr_min_cert only if certified, else rr_min
     rr_needed = rr_min_cert if certified else rr_min
     rr_ok = rr >= rr_needed
-    
+
     # Balanced trigger:
     # Must have structure + RR + direction + liquidity to trade
     # If volatility is high, we cap at WAIT (even if everything else is good)
     if rr_ok and structure_ok and bias in ("bullish", "bearish"):
-    
+
         if not liquidity_ok and confidence < (execution_confidence_min + 0.5):
             return Decision(
                 symbol, bias, mode, confidence,
@@ -232,7 +258,7 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
                 {},
                 score=score
             )
-    
+
         # FVG is a quality gate: without strong FVG we downgrade BUY/SELL -> WAIT
         if not fvg_gate and confidence < (execution_confidence_min + 0.5):
             return Decision(
@@ -242,7 +268,7 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
                 {},
                 score=score
             )
-            # --- Final risk throttle ---
+        # --- Final risk throttle ---
         if confidence < execution_confidence_min:
             return Decision(
                 symbol, bias, mode, confidence,
@@ -265,7 +291,7 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
             "High-confidence setup: conditions align strongly.", trade_plan,
             score=score
         )
-    
+
     # - Must have structure + RR + directional bias
     # - Liquidity is preferred: without it we won't fire BUY/SELL
     # - FVG is a *quality* gate: without strong FVG, we downgrade BUY/SELL -> WAIT
@@ -278,7 +304,7 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
                 {},
                 score=score
             )
-    
+
         # Liquidity OK + RR OK + structure OK => eligible to trade
         # If FVG isn't strong enough, be conservative and WAIT
         if not fvg_gate and confidence < (execution_confidence_min + 0.5):
@@ -289,7 +315,7 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
                 {},
                 score=score
             )
-    
+
         action = "BUY NOW" if bias == "bullish" else "SELL NOW"
         trade_plan = {
             "entry": factors.get("entry", "TBD"),

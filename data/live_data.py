@@ -7,38 +7,29 @@ from urllib.request import Request, urlopen
 
 import pandas as pd
 import streamlit as st
-import yfinance as yf
 
 # Map our internal symbols -> Yahoo tickers
 YF_MAP = {
     # FX Majors
     "EURUSD": "EURUSD=X",
     "GBPUSD": "GBPUSD=X",
-    "USDJPY": "JPY=X",       # sometimes "USDJPY=X" works too
+    "USDJPY": "JPY=X",
     "USDCHF": "CHF=X",
     "AUDUSD": "AUDUSD=X",
     "NZDUSD": "NZDUSD=X",
     "USDCAD": "CAD=X",
 
-    # FX Secondary
-    "EURJPY": "EURJPY=X",
-    "GBPJPY": "GBPJPY=X",
-    "EURGBP": "EURGBP=X",
-    "AUDJPY": "AUDJPY=X",
-    "CADJPY": "CADJPY=X",
-
-    # Commodities (prefer futures for reliability on Streamlit Cloud)
-    "XAUUSD": "GC=F",        # Gold futures
-    "XAGUSD": "SI=F",        # Silver futures
+    # Commodities (premium)
+    "XAUUSD": "GC=F",
+    "XAGUSD": "SI=F",
     "WTI": "CL=F",
 
-    # Indices (approximations)
+    # Indices
     "US30": "^DJI",
     "US100": "^NDX",
-    "US500": "^GSPC",
 }
 
-# Fallback tickers (try these if primary fails)
+# Fallback tickers
 YF_FALLBACKS = {
     "XAUUSD": ["GC=F", "XAUUSD=X"],
     "XAGUSD": ["SI=F", "XAGUSD=X"],
@@ -53,25 +44,13 @@ OANDA_MAP = {
     "AUDUSD": "AUD_USD",
     "NZDUSD": "NZD_USD",
     "USDCAD": "USD_CAD",
-    "EURJPY": "EUR_JPY",
-    "GBPJPY": "GBP_JPY",
-    "EURGBP": "EUR_GBP",
-    "AUDJPY": "AUD_JPY",
-    "CADJPY": "CAD_JPY",
     "XAUUSD": "XAU_USD",
     "XAGUSD": "XAG_USD",
     "WTI": "WTICO_USD",
     "US30": "US30_USD",
     "US100": "NAS100_USD",
-    "US500": "SPX500_USD",
 }
 
-@st.cache_data(ttl=300, show_spinner=False)
-def fetch_ohlc(symbol: str, interval: str = "15m", period: str = "5d") -> pd.DataFrame:
-    """
-    Fetch OHLC from Yahoo with robust fallbacks and rate-limit handling.
-    Always returns a DataFrame (possibly empty) with columns: open/high/low/close/volume.
-    """
 INTERVAL_TO_OANDA = {
     "1m": "M1",
     "5m": "M5",
@@ -82,6 +61,9 @@ INTERVAL_TO_OANDA = {
     "1d": "D",
 }
 
+# =========================================================
+# OHLC FETCHING
+# =========================================================
 
 def _interval_minutes(interval: str) -> int:
     if interval.endswith("m"):
@@ -94,7 +76,6 @@ def _interval_minutes(interval: str) -> int:
 
 
 def _period_to_count(period: str, interval: str) -> int:
-    # Keeps calls bounded while retaining enough history for EMA/ATR.
     period = (period or "5d").strip().lower()
     unit = period[-1]
     try:
@@ -143,13 +124,13 @@ def _fetch_oanda_ohlc(symbol: str, interval: str, period: str) -> pd.DataFrame:
     try:
         with urlopen(req, timeout=12) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
-    except (HTTPError, URLError, TimeoutError, ValueError):
+    except Exception:
         return pd.DataFrame()
 
-    candles = payload.get("candles", []) if isinstance(payload, dict) else []
+    candles = payload.get("candles", [])
     rows = []
     for c in candles:
-        if not isinstance(c, dict) or not c.get("complete"):
+        if not c.get("complete"):
             continue
         mid = c.get("mid") or {}
         try:
@@ -178,15 +159,8 @@ def _fetch_oanda_ohlc(symbol: str, interval: str, period: str) -> pd.DataFrame:
 def _fetch_yfinance_ohlc(symbol: str, interval: str, period: str) -> pd.DataFrame:
     yf_ticker = YF_MAP.get(symbol, symbol)
 
-    # Try primary + fallbacks
-    tickers_to_try = YF_FALLBACKS.get(symbol)
-    if not tickers_to_try:
-        tickers_to_try = [yf_ticker]
-    elif isinstance(tickers_to_try, str):
-        tickers_to_try = [tickers_to_try]
+    tickers_to_try = YF_FALLBACKS.get(symbol, [yf_ticker])
 
-
-    last_err = None
     for t in tickers_to_try:
         try:
             tmp = yf.download(
@@ -199,14 +173,11 @@ def _fetch_yfinance_ohlc(symbol: str, interval: str, period: str) -> pd.DataFram
             )
 
             if tmp is None or tmp.empty:
-                last_err = f"No data for {t}"
                 continue
 
-            # Flatten MultiIndex if present
             if hasattr(tmp.columns, "levels"):
                 tmp.columns = [c[0] if isinstance(c, tuple) else c for c in tmp.columns]
 
-            # Ensure numeric OHLC
             for col in ["Open", "High", "Low", "Close", "Volume"]:
                 if col in tmp.columns:
                     tmp[col] = pd.to_numeric(tmp[col], errors="coerce")
@@ -221,40 +192,73 @@ def _fetch_yfinance_ohlc(symbol: str, interval: str, period: str) -> pd.DataFram
                 }
             )
 
-            keep = [c for c in ["open", "high", "low", "close", "volume"] if c in tmp.columns]
-            tmp = tmp[keep].dropna()
+            tmp = tmp[["open", "high", "low", "close", "volume"]].dropna()
 
             if tmp.empty:
-                last_err = f"Empty after cleanup for {t}"
                 continue
 
-            # record which ticker worked
             tmp.attrs["used_ticker"] = t
             tmp.attrs["provider"] = "yfinance"
             return tmp
 
-        except Exception as e:
-            # Soft-fail on rate limits + any yfinance errors
-            last_err = repr(e)
         except Exception:
             continue
 
-    # All failed -> return empty DF (caller will use fallback last_good if you wired that)
     return pd.DataFrame()
 
 
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_ohlc(symbol: str, interval: str = "15m", period: str = "5d") -> pd.DataFrame:
-    """
-    Fetch OHLC using broker/API-grade source first (OANDA when token provided),
-    then fall back to Yahoo Finance.
-    Always returns a DataFrame (possibly empty) with columns:
-    open/high/low/close/volume.
-    """
-    # 1) Broker/API-grade first
     oanda_df = _fetch_oanda_ohlc(symbol, interval, period)
     if oanda_df is not None and not oanda_df.empty:
         return oanda_df
 
-    # 2) Fallback to Yahoo
     return _fetch_yfinance_ohlc(symbol, interval, period)
+
+
+# =========================================================
+# PREMIUM MODE: CANDLE-CLOSE CONFIRMATION
+# =========================================================
+
+def compute_confirmation_factors(df: pd.DataFrame, bias: str) -> dict:
+    """
+    Adds premium confirmation filters:
+    - confirmed_break: last closed candle broke structure
+    - atr_displacement_ok: move is meaningful
+    - close_direction_ok: candle closed in direction of bias
+    """
+
+    if df is None or df.empty or len(df) < 20:
+        return {
+            "confirmed_break": False,
+            "atr_displacement_ok": False,
+            "close_direction_ok": False,
+        }
+
+    last = df.iloc[-1]
+    prev = df.iloc[-2]
+
+    # ATR for displacement
+    df["tr"] = (df["high"] - df["low"]).abs()
+    atr = df["tr"].rolling(14).mean().iloc[-1]
+
+    # Directional close
+    close_direction_ok = (
+        (bias == "bullish" and last["close"] > last["open"]) or
+        (bias == "bearish" and last["close"] < last["open"])
+    )
+
+    # Break confirmation (simple version)
+    confirmed_break = (
+        (bias == "bullish" and last["close"] > prev["high"]) or
+        (bias == "bearish" and last["close"] < prev["low"])
+    )
+
+    # ATR displacement
+    atr_displacement_ok = abs(last["close"] - prev["close"]) > (0.3 * atr)
+
+    return {
+        "confirmed_break": confirmed_break,
+        "atr_displacement_ok": bool(atr_displacement_ok),
+        "close_direction_ok": bool(close_direction_ok),
+    }

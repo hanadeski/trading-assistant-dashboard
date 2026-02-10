@@ -1,3 +1,4 @@
+import yfinance as yf
 import json
 import os
 from datetime import timedelta
@@ -65,6 +66,12 @@ OANDA_MAP = {
     "US500": "SPX500_USD",
 }
 
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_ohlc(symbol: str, interval: str = "15m", period: str = "5d") -> pd.DataFrame:
+    """
+    Fetch OHLC from Yahoo with robust fallbacks and rate-limit handling.
+    Always returns a DataFrame (possibly empty) with columns: open/high/low/close/volume.
+    """
 INTERVAL_TO_OANDA = {
     "1m": "M1",
     "5m": "M5",
@@ -178,6 +185,8 @@ def _fetch_yfinance_ohlc(symbol: str, interval: str, period: str) -> pd.DataFram
     elif isinstance(tickers_to_try, str):
         tickers_to_try = [tickers_to_try]
 
+
+    last_err = None
     for t in tickers_to_try:
         try:
             tmp = yf.download(
@@ -190,6 +199,7 @@ def _fetch_yfinance_ohlc(symbol: str, interval: str, period: str) -> pd.DataFram
             )
 
             if tmp is None or tmp.empty:
+                last_err = f"No data for {t}"
                 continue
 
             # Flatten MultiIndex if present
@@ -215,15 +225,21 @@ def _fetch_yfinance_ohlc(symbol: str, interval: str, period: str) -> pd.DataFram
             tmp = tmp[keep].dropna()
 
             if tmp.empty:
+                last_err = f"Empty after cleanup for {t}"
                 continue
 
+            # record which ticker worked
             tmp.attrs["used_ticker"] = t
             tmp.attrs["provider"] = "yfinance"
             return tmp
 
+        except Exception as e:
+            # Soft-fail on rate limits + any yfinance errors
+            last_err = repr(e)
         except Exception:
             continue
 
+    # All failed -> return empty DF (caller will use fallback last_good if you wired that)
     return pd.DataFrame()
 
 

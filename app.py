@@ -306,16 +306,51 @@ def build_snapshot():
     thresholds = adapt_thresholds()
     session_label = session_name(datetime.now(timezone.utc))
 
+    # ------------------------------
+    # Finnhub symbol mapping
+    # ------------------------------
+    FINNHUB_SYMBOL_MAP = {
+        # FX
+        "EURUSD": "OANDA:EUR_USD",
+        "GBPUSD": "OANDA:GBP_USD",
+        "USDJPY": "OANDA:USD_JPY",
+        "AUDUSD": "OANDA:AUD_USD",
+        "NZDUSD": "OANDA:NZD_USD",
+        "USDCAD": "OANDA:USD_CAD",
+        "USDCHF": "OANDA:USD_CHF",
+    
+        # Metals
+        "XAUUSD": "OANDA:XAU_USD",
+        "XAGUSD": "OANDA:XAG_USD",
+    
+        # Oil
+        "WTI": "OANDA:WTICO_USD",
+        "BRENT": "OANDA:BCO_USD",
+    
+        # Indices
+        "SPX": "^GSPC",
+        "NAS100": "^NDX",
+        "DAX": "^GDAXI",
+        "FTSE100": "^FTSE",
+            
+    }    
+    
+    def to_finnhub_symbol(sym: str) -> str:
+        return FINNHUB_SYMBOL_MAP.get(sym, sym)
+
     for sym in symbols:
+        finnhub_sym = to_finnhub_symbol(sym)
+    
         try:
-            df = fetch_ohlc(sym, interval="15m", period="5d")
-            htf_df = fetch_ohlc(sym, interval="1h", period="1mo")
+            df = fetch_ohlc(finnhub_sym, interval="15m", period="5d")
+            htf_df = fetch_ohlc(finnhub_sym, interval="1h", period="1mo")
         except Exception:
             df = None
             htf_df = None
 
         if df is None or df.empty or len(df) < 60:
             factors_by_symbol[sym] = {
+                "source_symbol": finnhub_sym,
                 "bias": "neutral",
                 "session_boost": 0.0,
                 "structure_ok": False,
@@ -407,6 +442,7 @@ def build_snapshot():
         certified = liquidity_ok and structure_ok and rr >= 3.0
 
         factors_by_symbol[sym] = {
+            "source_symbol": finnhub_sym,
             "bias": bias,
             "session_boost": 0.5,
             "structure_ok": structure_ok,

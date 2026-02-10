@@ -5,7 +5,7 @@ import streamlit as st
 from engine.scoring import decide_from_factors, Decision
 from engine.risk import apply_sizing
 
-COOLDOWN_SECS = 60 * 20  # 20 minutes
+COOLDOWN_SECS = 60 * 60  # 60 minutes
 
 
 def run_decisions(profiles: List, factors_by_symbol: Dict[str, Dict]) -> List[Decision]:

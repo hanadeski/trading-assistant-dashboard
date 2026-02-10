@@ -345,6 +345,8 @@ def build_snapshot():
             df = fetch_ohlc(finnhub_sym, interval="15m", period="5d")
             htf_df = fetch_ohlc(finnhub_sym, interval="1h", period="1mo")
 
+            st.write("FINNHUB KEY LOADED:", FINNHUB_API_KEY)
+
             # ⭐ DEBUG LINE GOES HERE st.write("DEBUG:", sym, "->", df)
             st.write("DEBUG:", sym, "->", df)
             

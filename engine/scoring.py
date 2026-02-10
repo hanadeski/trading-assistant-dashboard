@@ -5,15 +5,6 @@ from engine.fvg import detect_fvgs
 
 SETUP_SCORE_THRESHOLD = 6.6
 EXECUTION_SCORE_THRESHOLD = 7.8
-EXECUTION_CONFIDENCE_MIN = 7.8
-
-from dataclasses import dataclass, field
-from typing import Dict
-import pandas as pd
-from engine.fvg import detect_fvgs
-
-SETUP_SCORE_THRESHOLD = 6.6
-EXECUTION_SCORE_THRESHOLD = 7.8
 EXECUTION_CONFIDENCE_MIN = 7.5
 
 @dataclass
@@ -130,8 +121,7 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
     # --- RR thresholds ---
     rr_min = profile.rr_min
     rr_min_cert = profile.certified_rr_min
-    session_name = str(factors.get("session_name", ""))
-    rr_required = 1.8 if "asia" in session_name.lower() else 2.0
+    rr_required = 2.5
 
     # ------------------------
     # Base scoring
@@ -185,6 +175,7 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
         and structure_ok
         and liquidity_ok
         and rr >= rr_required
+        and confidence >= 8.0
         and news_risk != "against"
     )
 
@@ -253,7 +244,7 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
     # If volatility is high, we cap at WAIT (even if everything else is good)
     if rr_ok and structure_ok and bias in ("bullish", "bearish"):
 
-        if not liquidity_ok and confidence < (execution_confidence_min + 0.5):
+        if not liquidity_ok:
             return Decision(
                 symbol, bias, mode, confidence,
                 "WAIT",
@@ -262,7 +253,7 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
                 score=score
             )
 
-        # FVG is a quality gate: without strong FVG we downgrade BUY/SELL -> WAIT
+        # FVG is a quality gate in higher-score branches.
         if not fvg_gate and confidence < (execution_confidence_min + 0.5):
             return Decision(
                 symbol, bias, mode, confidence,
@@ -271,50 +262,12 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
                 {},
                 score=score
             )
-        # --- Final risk throttle ---
+
         if confidence < execution_confidence_min:
             return Decision(
                 symbol, bias, mode, confidence,
                 "WAIT",
                 "Setup forming, but confidence below execution threshold.",
-                {},
-                score=score
-            )
-
-        action = "BUY NOW" if bias == "bullish" else "SELL NOW"
-        trade_plan = {
-            "entry": factors.get("entry", "TBD"),
-            "stop": factors.get("stop", "TBD"),
-            "tp1": factors.get("tp1", "TBD"),
-            "tp2": factors.get("tp2", "TBD"),
-            "rr": rr,
-        }
-        return Decision(
-            symbol, bias, mode, confidence, action,
-            "High-confidence setup: conditions align strongly.", trade_plan,
-            score=score
-        )
-
-    # - Must have structure + RR + directional bias
-    # - Liquidity is preferred: without it we won't fire BUY/SELL
-    # - FVG is a *quality* gate: without strong FVG, we downgrade BUY/SELL -> WAIT
-    if rr_ok and structure_ok and bias in ("bullish", "bearish"):
-        if not liquidity_ok and confidence < (execution_confidence_min + 0.5):
-            return Decision(
-                symbol, bias, mode, confidence,
-                "WAIT",
-                "High score, but liquidity not confirmed; wait for cleaner conditions.",
-                {},
-                score=score
-            )
-
-        # Liquidity OK + RR OK + structure OK => eligible to trade
-        # If FVG isn't strong enough, be conservative and WAIT
-        if not fvg_gate and confidence < (execution_confidence_min + 0.5):
-            return Decision(
-                symbol, bias, mode, confidence,
-                "WAIT",
-                "Setup is strong, but FVG context isn’t strong enough; wait for cleaner confirmation/entry.",
                 {},
                 score=score
             )

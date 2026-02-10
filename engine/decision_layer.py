@@ -5,6 +5,7 @@ import streamlit as st
 from engine.scoring import decide_from_factors, Decision
 from engine.risk import apply_sizing
 
+COOLDOWN_SECS = 60 * 20  # 20 minutes
 COOLDOWN_SECS = 60 * 60  # 60 minutes
 
 
@@ -33,6 +34,7 @@ def run_decisions(profiles: List, factors_by_symbol: Dict[str, Dict]) -> List[De
         # --- Step 4A execution gate ---
         if proposed_action in ("BUY NOW", "SELL NOW"):
             # 1) Minimum confidence to allow execution (extremely low guardrail)
+            if d.confidence < 5.0:
             if d.confidence < 7.0:
                 d = Decision(sym, d.bias, d.mode, d.confidence, "WAIT",
                              "Setup strong but confidence is extremely low (Step 4A).", {})

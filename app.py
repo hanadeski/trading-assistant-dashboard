@@ -310,30 +310,30 @@ def build_snapshot():
     # Finnhub symbol mapping
     # ------------------------------
     FINNHUB_SYMBOL_MAP = {
-        # FX
-        "EURUSD": "OANDA:EUR_USD",
-        "GBPUSD": "OANDA:GBP_USD",
-        "USDJPY": "OANDA:USD_JPY",
-        "AUDUSD": "OANDA:AUD_USD",
-        "NZDUSD": "OANDA:NZD_USD",
-        "USDCAD": "OANDA:USD_CAD",
-        "USDCHF": "OANDA:USD_CHF",
-    
-        # Metals
-        "XAUUSD": "OANDA:XAU_USD",
-        "XAGUSD": "OANDA:XAG_USD",
-    
-        # Oil
-        "WTI": "OANDA:WTICO_USD",
-        "BRENT": "OANDA:BCO_USD",
-    
-        # Indices
-        "SPX": "^GSPC",
-        "NAS100": "^NDX",
-        "DAX": "^GDAXI",
-        "FTSE100": "^FTSE",
-            
-    }    
+    # FX (Finnhub free plan)
+    "EURUSD": "FX:EURUSD",
+    "GBPUSD": "FX:GBPUSD",
+    "USDJPY": "FX:USDJPY",
+    "AUDUSD": "FX:AUDUSD",
+    "NZDUSD": "FX:NZDUSD",
+    "USDCAD": "FX:USDCAD",
+    "USDCHF": "FX:USDCHF",
+
+    # Metals (Finnhub free plan)
+    "XAUUSD": "FX:XAUUSD",
+    "XAGUSD": "FX:XAGUSD",
+
+    # Oil (Finnhub free plan)
+    "WTI": "FX:WTI",
+    "BRENT": "FX:BRENT",
+
+    # Indices (Finnhub supports these)
+    "SPX": "^GSPC",
+    "NAS100": "^NDX",
+    "DAX": "^GDAXI",
+    "FTSE100": "^FTSE",
+}
+
     
     def to_finnhub_symbol(sym: str) -> str:
         return FINNHUB_SYMBOL_MAP.get(sym, sym)

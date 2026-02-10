@@ -174,6 +174,8 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
         bias in ("bullish", "bearish")
         and structure_ok
         and liquidity_ok
+        and certified
+        and fvg_gate
         and rr >= rr_required
         and confidence >= 8.0
         and news_risk != "against"
@@ -253,8 +255,8 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
                 score=score
             )
 
-        # FVG is a quality gate in higher-score branches.
-        if not fvg_gate and confidence < (execution_confidence_min + 0.5):
+        # FVG is a strict quality gate in higher-score branches.
+        if not fvg_gate:
             return Decision(
                 symbol, bias, mode, confidence,
                 "WAIT",

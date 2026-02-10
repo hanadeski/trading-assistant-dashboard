@@ -500,4 +500,5 @@ except Exception as e:
 
 try:
     render_top_bar(news_flag="Live prices (v1)")
-except
+except Exception as e:
+    fail_soft("Top bar failed", e)

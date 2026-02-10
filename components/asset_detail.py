@@ -178,16 +178,16 @@ def render_asset_detail(profile, decision, factors=None):
     st.markdown("### Score breakdown")
     breakdown = build_score_breakdown(profile, factors)
     breakdown_rows = [
-        ("Bias alignment", breakdown["bias_score"]),
-        ("Structure", breakdown["structure_score"]),
-        ("Liquidity", breakdown["liquidity_score"]),
-        ("Session boost", breakdown["session_score"]),
-        ("RR bonus", breakdown["rr_score"]),
-        ("Volatility penalty", breakdown["volatility_penalty"]),
-        ("News penalty", breakdown["news_penalty"]),
-        ("FVG penalty", breakdown["fvg_penalty"]),
-        ("HTF conflict penalty", breakdown["htf_penalty"]),
-        ("Range regime penalty", breakdown["regime_penalty"]),
+        ("Bias alignment", breakdown.get("bias_score", 0)),
+        ("Structure", breakdown.get("structure_score", 0)),
+        ("Liquidity", breakdown.get("liquidity_score", 0)),
+        ("Session boost", breakdown.get("session_score", 0)),
+        ("RR bonus", breakdown.get("rr_score", 0)),
+        ("Volatility penalty", breakdown.get("volatility_penalty", 0)),
+        ("News penalty", breakdown.get("news_penalty", 0)),
+        ("FVG penalty", breakdown.get("fvg_penalty", 0)),
+        ("HTF conflict penalty", breakdown.get("htf_penalty", 0)),
+        ("Range regime penalty", breakdown.get("regime_penalty", 0)),
     ]
     breakdown_df = pd.DataFrame(breakdown_rows, columns=["Component", "Contribution"])
     breakdown_df["Contribution"] = breakdown_df["Contribution"].map(lambda v: f"{v:+.2f}")

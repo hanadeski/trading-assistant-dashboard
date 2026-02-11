@@ -503,8 +503,7 @@ SNAPSHOT_INTERVAL_SECS = 30
 now = int(time.time())
 should_snapshot = LIVE_DATA
 
-
-    if LIVE_DATA:
+if LIVE_DATA:
     with st.spinner("Building snapshot (live data)..."):
         try:
             (

@@ -8,6 +8,9 @@ from datetime import datetime, timezone
 import streamlit as st
 import pandas as pd
 
+from streamlit import secrets
+FINNHUB_API_KEY = secrets["FINNHUB_API_KEY"]
+
 from engine.profiles import get_profiles
 from engine.decision_layer import run_decisions
 from engine.fvg import compute_fvg_context
@@ -140,7 +143,7 @@ with st.sidebar.expander("⚙️ Safety toggles", expanded=False):
     DEBUG = st.toggle("DEBUG (show full exceptions)", value=False)
     ALERT_MODE3 = st.toggle("Telegram Mode 3 (opens + closes)", value=True)
     ALERT_HIGHCONF = st.toggle("High-confidence BUY/SELL alerts", value=True)
-    LIVE_DATA = st.toggle("Live data (yfinance)", value=True)
+    LIVE_DATA = st.toggle("Live data (Finnhub)", value=True)
     AUTO_REFRESH = st.toggle("Auto-refresh snapshot", value=False)
     REFRESH_SECONDS = st.slider("Refresh interval (seconds)", 30, 600, 120, step=30)
 
@@ -345,7 +348,6 @@ def build_snapshot():
             df = fetch_ohlc(finnhub_sym, interval="15m", period="5d")
             htf_df = fetch_ohlc(finnhub_sym, interval="1h", period="1mo")
 
-            st.write("FINNHUB KEY LOADED:", FINNHUB_API_KEY)
 
             # ⭐ DEBUG LINE GOES HERE st.write("DEBUG:", sym, "->", df)
             st.write("DEBUG:", sym, "->", df)
@@ -507,7 +509,7 @@ should_snapshot = (
     )
 )
 
-if should_snapshot:
+    if LIVE_DATA:
     with st.spinner("Building snapshot (live data)..."):
         try:
             (

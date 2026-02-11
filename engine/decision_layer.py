@@ -8,6 +8,25 @@ from engine.risk import apply_sizing
 COOLDOWN_SECS = 60 * 60  # 60 minutes
 
 
+def _downgrade_to_wait(d: Decision, reason: str) -> Decision:
+    """
+    Keep trade_plan/meta/sizing, but prevent execution.
+    """
+    return Decision(
+        symbol=d.symbol,
+        bias=d.bias,
+        mode="standby",
+        confidence=d.confidence,
+        action="WAIT",
+        commentary=reason,
+        trade_plan=d.trade_plan,     # keep
+        score=d.score,              # keep
+        risk_pct=d.risk_pct,         # keep
+        size=d.size,                 # keep
+        meta=d.meta,                 # keep
+    )
+
+
 def run_decisions(profiles: List, factors_by_symbol: Dict[str, Dict]) -> List[Decision]:
     # Persist cooldown state across Streamlit reruns
     if "_last_fired" not in st.session_state:
@@ -23,19 +42,18 @@ def run_decisions(profiles: List, factors_by_symbol: Dict[str, Dict]) -> List[De
 
     for p in profiles:
         sym = p.symbol
-        
+
         factors = factors_by_symbol.get(sym, {})
         d = decide_from_factors(sym, p, factors)
         d = apply_sizing(d, p, factors)
 
-        proposed_action = d.action  # capture what we were going to do
+        proposed_action = d.action
 
         # --- Step 4A execution gate ---
         if proposed_action in ("BUY NOW", "SELL NOW"):
-            # 1) Minimum confidence to allow execution (extremely low guardrail)
+            # 1) Minimum confidence to allow execution (very low guardrail)
             if d.confidence < 7.0:
-                d = Decision(sym, d.bias, d.mode, d.confidence, "WAIT",
-                             "Setup strong but confidence is extremely low (Step 4A).", {})
+                d = _downgrade_to_wait(d, "Setup detected but confidence is extremely low (Step 4A).")
 
             # 2) Cooldown: prevent repeated same-direction firing
             last_action = last_fired.get(sym)
@@ -43,8 +61,7 @@ def run_decisions(profiles: List, factors_by_symbol: Dict[str, Dict]) -> List[De
             in_window = (now - last_ts) < COOLDOWN_SECS
 
             if in_window and last_action == proposed_action:
-                d = Decision(sym, d.bias, d.mode, d.confidence, "WAIT",
-                             "Already fired this direction recently (Step 4A).", {})
+                d = _downgrade_to_wait(d, "Already fired this direction recently (Step 4A cooldown).")
 
         # record fires (only if we are still firing)
         if d.action in ("BUY NOW", "SELL NOW"):

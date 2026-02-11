@@ -2,10 +2,9 @@ import os
 import finnhub
 import pandas as pd
 from datetime import datetime, timedelta
+from streamlit import secrets
 
-FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY")
-
-client = finnhub.Client(api_key=FINNHUB_API_KEY)
+client = finnhub.Client(api_key=secrets["FINNHUB_API_KEY"])
 
 # Map your intervals to Finnhub resolutions
 RESOLUTION_MAP = {

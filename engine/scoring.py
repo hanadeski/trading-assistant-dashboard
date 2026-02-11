@@ -1,11 +1,12 @@
 from dataclasses import dataclass, field
 from typing import Dict
-import pandas as pd
-from engine.fvg import detect_fvgs
 
-SETUP_SCORE_THRESHOLD = 6.6
-EXECUTION_SCORE_THRESHOLD = 7.8
-EXECUTION_CONFIDENCE_MIN = 7.5
+
+SETUP_SCORE_THRESHOLD = 7.0
+EXECUTION_SCORE_THRESHOLD = 8.5
+EXECUTION_CONFIDENCE_MIN = 8.5
+MIN_RR = 2.0
+
 
 @dataclass
 class Decision:
@@ -23,258 +24,176 @@ class Decision:
     size: float = 0.0
     meta: Dict = field(default_factory=dict)
 
+
 def clamp(x: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, x))
 
+
 def build_score_breakdown(profile, factors: Dict) -> Dict[str, float]:
-    bias = factors.get("bias", "neutral")
-    session_boost = float(factors.get("session_boost", 0.0))
-    liquidity_ok = bool(factors.get("liquidity_ok", False))
-    structure_ok = bool(factors.get("structure_ok", False))
-    rr = float(factors.get("rr", 0.0))
-    volatility_risk = factors.get("volatility_risk", "normal")
-    news_risk = factors.get("news_risk", "none")
-    htf_bias = factors.get("htf_bias", "neutral")
-    regime = factors.get("regime", "range")
-    fvg_score = float(factors.get("fvg_score", 0.0))
+    """
+    PO3 confidence model (max 10):
+      PO3 active +2
+      Liquidity sweep +2
+      Agreement reclaim +1
+      MSS shift +2
+      Entry quality +1
+      Session alignment +1
+      HTF bias +1
+    """
+    po3_active = bool(factors.get("po3_active", False))
+    liquidity_sweep = bool(factors.get("liquidity_sweep", False))
+    agreement_reclaim = bool(factors.get("agreement_reclaim", False))
+    mss_shift = bool(factors.get("mss_shift", False))
+    entry_quality = bool(factors.get("entry_quality", False))
+    session_alignment = bool(factors.get("session_alignment", False))
+    htf_alignment = bool(factors.get("htf_alignment", False))
 
-    bias_score = 2.5 if bias in ("bullish", "bearish") else 0.0
-    structure_score = 2.5 if structure_ok else 0.0
-    liquidity_score = 2.5 if liquidity_ok else 0.0
-    session_score = 2.0 * session_boost
-    rr_score = clamp((rr - 1.0), 0.0, 3.0)
+    po3_score = 2.0 if po3_active else 0.0
+    sweep_score = 2.0 if liquidity_sweep else 0.0
+    agreement_score = 1.0 if agreement_reclaim else 0.0
+    mss_score = 2.0 if mss_shift else 0.0
+    entry_score = 1.0 if entry_quality else 0.0
+    session_score = 1.0 if session_alignment else 0.0
+    htf_score = 1.0 if htf_alignment else 0.0
 
-    volatility_penalty = 0.0
-    if volatility_risk == "high":
-        volatility_penalty = -0.2
-    elif volatility_risk == "extreme":
-        volatility_penalty = -0.6
-
-    news_penalty = 0.0
-    if news_risk == "against":
-        news_penalty = -2.0
-    elif news_risk == "near":
-        news_penalty = -0.5
-
-    htf_penalty = -1.0 if htf_bias not in ("neutral", bias) else 0.0
-    regime_penalty = 0.0
-
-    score = (
-        bias_score
-        + structure_score
-        + liquidity_score
+    total_score = clamp(
+        po3_score
+        + sweep_score
+        + agreement_score
+        + mss_score
+        + entry_score
         + session_score
-        + rr_score
-        + volatility_penalty
-        + news_penalty
-        + htf_penalty
-        + regime_penalty
+        + htf_score,
+        0.0,
+        10.0,
     )
-    score = clamp(score, 0.0, 10.0)
 
+    # Compatibility keys kept for existing UI components.
     return {
-        "bias_score": bias_score,
-        "structure_score": structure_score,
-        "liquidity_score": liquidity_score,
+        "po3_score": po3_score,
+        "sweep_score": sweep_score,
+        "agreement_score": agreement_score,
+        "mss_score": mss_score,
+        "entry_score": entry_score,
         "session_score": session_score,
-        "rr_score": rr_score,
-        "volatility_penalty": volatility_penalty,
-        "news_penalty": news_penalty,
-        "htf_penalty": htf_penalty,
-        "regime_penalty": regime_penalty,
-        "total_score": score,
+        "htf_score": htf_score,
+        "bias_score": 0.0,
+        "structure_score": 0.0,
+        "liquidity_score": 0.0,
+        "rr_score": 0.0,
+        "volatility_penalty": 0.0,
+        "news_penalty": 0.0,
+        "htf_penalty": 0.0,
+        "regime_penalty": 0.0,
+        "total_score": total_score,
     }
 
+
 def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
-    bias = factors.get("bias", "neutral")
-    session_boost = float(factors.get("session_boost", 0.0))
-    liquidity_ok = bool(factors.get("liquidity_ok", False))
-    structure_ok = bool(factors.get("structure_ok", False))
+    po3_bias = factors.get("po3_bias", factors.get("bias", "neutral"))
     rr = float(factors.get("rr", 0.0))
-    certified = bool(factors.get("certified", False))
-    volatility_risk = factors.get("volatility_risk", "normal")
-    news_risk = factors.get("news_risk", "none")
-    htf_bias = factors.get("htf_bias", "neutral")
-    regime = factors.get("regime", "range")
-    setup_score_threshold = float(factors.get("setup_score_threshold", SETUP_SCORE_THRESHOLD))
-    execution_score_threshold = float(
-        factors.get("execution_score_threshold", EXECUTION_SCORE_THRESHOLD)
-    )
-    execution_confidence_min = float(
-        factors.get("execution_confidence_min", EXECUTION_CONFIDENCE_MIN)
-    )
+    news_block = bool(factors.get("news_block", False))
+    session_name = str(factors.get("session_name", ""))
+    session_valid = bool(factors.get("session_valid", True))
+    is_asia = "asia" in session_name.lower()
 
-    # Hard caps: never trade in hostile regimes
-    if news_risk == "against":
-        return Decision(
-            symbol, bias, "standby", 0.0,
-            "DO NOTHING",
-            "Stand down: risk regime is hostile.",
-            {},
-            score=0.0
-        )
+    po3_phase = str(factors.get("po3_phase", "ACCUMULATION")).upper()
+    accumulation_detected = bool(factors.get("accumulation_detected", False))
+    liquidity_sweep = bool(factors.get("liquidity_sweep", False))
+    agreement_reclaim = bool(factors.get("agreement_reclaim", False))
+    mss_shift = bool(factors.get("mss_shift", False))
+    entry_quality = bool(factors.get("entry_quality", False))
+    htf_alignment = bool(factors.get("htf_alignment", False))
+    distribution_active = bool(factors.get("distribution_active", False))
+    structure_ok = bool(factors.get("structure_ok", False))
 
-    # FVG context
-    near_fvg = bool(factors.get("near_fvg", False))
-    fvg_score = float(factors.get("fvg_score", 0.0))
-    fvg_gate = near_fvg and (fvg_score >= 0.6)
-    # --- RR thresholds ---
-    rr_min = profile.rr_min
-    rr_min_cert = profile.certified_rr_min
-    rr_required = 2.5
-
-    # ------------------------
-    # Base scoring
-    # ------------------------
     score_breakdown = build_score_breakdown(profile, factors)
-    score = score_breakdown["total_score"]
-    # --- Confidence calibration ---
-    # Ensure scores map cleanly to decision strength
-    if score < 5.0:
-        confidence = score
-    elif score < 7.0:
-        confidence = score * 0.9
-    elif score < 9.0:
-        confidence = score * 0.95
-    else:
-        confidence = min(score, 10.0)
-    # ------------------------
-    # Decision defaults
-    # ------------------------
-    mode = profile.aggression_default
-    action = "WAIT"
-    commentary = "Conditions developing."
-    trade_plan: Dict = {}
+    confidence = score_breakdown["total_score"]
 
-    # --- FVG messaging (4.5B) ---
-    if fvg_score >= 0.6:
-        commentary += " Strong FVG context nearby—expect volatility; reduce size and wait for clean confirmation."
-    elif fvg_score >= 0.3:
-        commentary += " Mild FVG context nearby—expect reaction; be selective on entry."
+    base_meta = {
+        "po3_phase": po3_phase,
+        "setup_type": "NONE",
+        "model": "PO3_SNIPER_FIRST",
+    }
 
-    if near_fvg:
-        commentary += " Price is near a Fair Value Gap (FVG); expect reactions and fakeouts—wait for confirmation."
-
-    if htf_bias not in ("neutral", bias):
-        commentary += " Higher-timeframe bias conflicts; wait for alignment."
-    if regime == "range":
-        commentary += " Range-bound regime detected; demand cleaner trend confirmation."
-
-    # ------------------------
-    # Decision ladder
-    # ------------------------
-    if score < 5.0:
-        return Decision(
-            symbol, bias, "standby", confidence, "DO NOTHING",
-            "No edge: choppy or mid-range conditions.", {},
-            score=score
-        )
-
-    core_rules_ok = (
-        bias in ("bullish", "bearish")
-        and structure_ok
-        and liquidity_ok
-        and certified
-        and fvg_gate
-        and rr >= rr_required
-        and confidence >= 8.0
-        and news_risk != "against"
-    )
-
-    if core_rules_ok:
-        action = "BUY NOW" if bias == "bullish" else "SELL NOW"
-        trade_plan = {
-            "entry": factors.get("entry", "TBD"),
-            "stop": factors.get("stop", "TBD"),
-            "tp1": factors.get("tp1", "TBD"),
-            "tp2": factors.get("tp2", "TBD"),
-            "rr": rr,
-        }
+    if news_block:
         return Decision(
             symbol,
-            bias,
-            mode,
+            po3_bias,
+            "standby",
+            confidence,
+            "DO NOTHING",
+            "High-impact news window: block new entries for ±15 minutes.",
+            {},
+            score=confidence,
+            meta=base_meta,
+        )
+
+    if rr < MIN_RR:
+        return Decision(
+            symbol,
+            po3_bias,
+            "standby",
+            confidence,
+            "WAIT",
+            "RR below minimum 2.0 requirement.",
+            {},
+            score=confidence,
+            meta=base_meta,
+        )
+
+    # Sniper requirements (all required)
+    sniper_ready = (
+        accumulation_detected
+        and liquidity_sweep
+        and agreement_reclaim
+        and mss_shift
+        and entry_quality
+        and session_valid
+        and rr >= MIN_RR
+        and not news_block
+    )
+
+    # Asia is allowed but stricter for sniper setups.
+    if is_asia:
+        sniper_ready = sniper_ready and htf_alignment and confidence >= 9.0
+
+    if sniper_ready and confidence >= EXECUTION_CONFIDENCE_MIN and po3_bias in ("bullish", "bearish"):
+        action = "BUY NOW" if po3_bias == "bullish" else "SELL NOW"
+        trade_plan = {
+            "entry": factors.get("entry", "TBD"),
+            "stop": factors.get("stop", "TBD"),
+            "tp1": factors.get("tp1", "TBD"),  # >= 2R by construction
+            "tp2": factors.get("tp2", "TBD"),  # HTF liquidity target when available
+            "rr": rr,
+        }
+        meta = {**base_meta, "setup_type": "SNIPER"}
+        return Decision(
+            symbol,
+            po3_bias,
+            "sniper",
             confidence,
             action,
-            "Core setup aligned (bias/structure/liquidity/RR).",
+            "PO3 sniper setup confirmed (accumulation → sweep → agreement reclaim → MSS).",
             trade_plan,
-            score=score,
+            score=confidence,
+            meta=meta,
         )
 
-    # -----------------------------
-    # Decision ladder (Balanced)
-    # -----------------------------
-    # 1) Low score = WATCH
-    if score < setup_score_threshold:
-        return Decision(
-            symbol, bias, "conservative", confidence,
-            "WATCH",
-            "Watch: bias exists but confirmation is incomplete.",
-            {},
-            score=score
-        )
+    # Continuation requirements (lighter but controlled)
+    continuation_ready = (
+        distribution_active
+        and structure_ok
+        and entry_quality
+        and session_valid
+        and rr >= MIN_RR
+        and po3_bias in ("bullish", "bearish")
+    )
+    if is_asia:
+        continuation_ready = continuation_ready and htf_alignment
 
-    # 2) Mid score = WAIT (only if structure + RR are decent), else WATCH
-    if score < execution_score_threshold:
-        # Balanced: require RR + structure for "WAIT"
-        if rr >= rr_min and structure_ok and bias in ("bullish", "bearish"):
-            return Decision(
-                symbol, bias, mode, confidence,
-                "WAIT",
-                "Good setup forming; wait for a cleaner trigger/entry.",
-                {},
-                score=score
-            )
-
-        return Decision(
-            symbol, bias, mode, confidence,
-            "WATCH",
-            "Conditions improving, but missing liquidity/structure/RR to progress.",
-            {},
-            score=score
-        )
-
-    # 3) High score zone: decide whether we can trigger
-    mode = "aggressive" if certified else "balanced"
-
-    # RR gate: use rr_min_cert only if certified, else rr_min
-    rr_needed = rr_min_cert if certified else rr_min
-    rr_ok = rr >= rr_needed
-
-    # Balanced trigger:
-    # Must have structure + RR + direction + liquidity to trade
-    # If volatility is high, we cap at WAIT (even if everything else is good)
-    if rr_ok and structure_ok and bias in ("bullish", "bearish"):
-
-        if not liquidity_ok:
-            return Decision(
-                symbol, bias, mode, confidence,
-                "WAIT",
-                "High score, but liquidity not confirmed; wait for cleaner conditions.",
-                {},
-                score=score
-            )
-
-        # FVG is a strict quality gate in higher-score branches.
-        if not fvg_gate:
-            return Decision(
-                symbol, bias, mode, confidence,
-                "WAIT",
-                "Setup is strong, but FVG context isn’t strong enough; wait for cleaner confirmation/entry.",
-                {},
-                score=score
-            )
-
-        if confidence < execution_confidence_min:
-            return Decision(
-                symbol, bias, mode, confidence,
-                "WAIT",
-                "Setup forming, but confidence below execution threshold.",
-                {},
-                score=score
-            )
-
-        action = "BUY NOW" if bias == "bullish" else "SELL NOW"
+    if continuation_ready and confidence >= SETUP_SCORE_THRESHOLD:
+        action = "BUY NOW" if po3_bias == "bullish" else "SELL NOW"
         trade_plan = {
             "entry": factors.get("entry", "TBD"),
             "stop": factors.get("stop", "TBD"),
@@ -282,16 +201,33 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
             "tp2": factors.get("tp2", "TBD"),
             "rr": rr,
         }
+        meta = {**base_meta, "setup_type": "CONTINUATION"}
         return Decision(
-            symbol, bias, mode, confidence, action,
-            "High-confidence setup: conditions align strongly.", trade_plan,
-            score=score
+            symbol,
+            po3_bias,
+            "continuation",
+            confidence,
+            action,
+            "Controlled continuation: distribution active with intact structure.",
+            trade_plan,
+            score=confidence,
+            meta=meta,
         )
 
+    commentary = "No clean PO3 narrative yet (no forced trades)."
+    if not liquidity_sweep:
+        commentary = "Waiting for valid liquidity sweep (Phase 2 manipulation)."
+    elif liquidity_sweep and not mss_shift:
+        commentary = "Sweep detected; waiting for 15m MSS and displacement confirmation."
+
     return Decision(
-        symbol, bias, mode, confidence,
-        "WAIT",
-        "No actionable setup yet; wait for confirmation.",
+        symbol,
+        po3_bias,
+        "standby",
+        confidence,
+        "WATCH",
+        commentary,
         {},
-        score=score
+        score=confidence,
+        meta=base_meta,
     )

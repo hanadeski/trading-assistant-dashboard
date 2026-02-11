@@ -73,17 +73,20 @@ def render_asset_detail(profile, decision, factors=None):
         f"Symbol: {profile.symbol} • {profile.asset_class} • Volatility: {profile.volatility}"
     )
 
-    c1, c2, c3, c4, c5 = st.columns((1, 1, 1, 1, 1))
+    c1, c2, c3, c4, c5, c6 = st.columns((1, 1, 1, 1, 1, 1))
     c1.metric("Bias", str(decision.bias).capitalize())
     c2.metric("Mode", str(decision.mode).capitalize())
     c3.metric("Confidence", f"{float(decision.confidence):.1f}/10")
     c4.metric("Action", str(decision.action))
 
+    meta = getattr(decision, "meta", {}) or {}
+    c5.metric("PO3 Phase", str(meta.get("po3_phase", factors.get("po3_phase", "ACCUMULATION"))).upper())
+    c6.metric("Setup", str(meta.get("setup_type", "NONE")).upper())
+
     fvg_score = float(factors.get("fvg_score", 0.0))
     near_fvg = bool(factors.get("near_fvg", False))
 
-    c5.metric("FVG Score", f"{fvg_score:.2f}")
-    st.caption(f"Near FVG: {'✅ Yes' if near_fvg else '– No'}")
+    st.caption(f"Near FVG: {'✅ Yes' if near_fvg else '– No'} • FVG score: {fvg_score:.2f}")
     # Fetch live data early so we can show the data source
     df = fetch_ohlc(profile.symbol, interval="15m", period="5d")
     used_ticker = df.attrs.get("used_ticker")
@@ -178,16 +181,13 @@ def render_asset_detail(profile, decision, factors=None):
     st.markdown("### Score breakdown")
     breakdown = build_score_breakdown(profile, factors)
     breakdown_rows = [
-        ("Bias alignment", breakdown.get("bias_score", 0.0)),
-        ("Structure", breakdown.get("structure_score", 0.0)),
-        ("Liquidity", breakdown.get("liquidity_score", 0.0)),
-        ("Session boost", breakdown.get("session_score", 0.0)),
-        ("RR bonus", breakdown.get("rr_score", 0.0)),
-        ("Volatility penalty", breakdown.get("volatility_penalty", 0.0)),
-        ("News penalty", breakdown.get("news_penalty", 0.0)),
-        ("FVG penalty", breakdown.get("fvg_penalty", 0.0)),
-        ("HTF conflict penalty", breakdown.get("htf_penalty", 0.0)),
-        ("Range regime penalty", breakdown.get("regime_penalty", 0.0)),
+        ("PO3 active", breakdown.get("po3_score", 0.0)),
+        ("Liquidity sweep", breakdown.get("sweep_score", 0.0)),
+        ("Agreement reclaim", breakdown.get("agreement_score", 0.0)),
+        ("MSS shift", breakdown.get("mss_score", 0.0)),
+        ("Entry quality", breakdown.get("entry_score", 0.0)),
+        ("Session alignment", breakdown.get("session_score", 0.0)),
+        ("HTF alignment", breakdown.get("htf_score", 0.0)),
     ]
     breakdown_df = pd.DataFrame(breakdown_rows, columns=["Component", "Contribution"])
     breakdown_df["Contribution"] = breakdown_df["Contribution"].map(lambda v: f"{v:+.2f}")

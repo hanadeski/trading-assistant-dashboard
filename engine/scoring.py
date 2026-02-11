@@ -82,7 +82,7 @@ def build_score_breakdown(profile, factors: Dict) -> Dict[str, float]:
         "liquidity_score": 0.0,
         "rr_score": 0.0,
         "volatility_penalty": 0.0,
-        "news_penalty": 0.0,
+        "news_penalty": 0.0,        # we will populate this in decide_from_factors
         "htf_penalty": 0.0,
         "regime_penalty": 0.0,
         "total_score": total_score,
@@ -92,10 +92,21 @@ def build_score_breakdown(profile, factors: Dict) -> Dict[str, float]:
 def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
     po3_bias = factors.get("po3_bias", factors.get("bias", "neutral"))
     rr = float(factors.get("rr", 0.0))
+
+    # News now = caution only (no blocking)
     news_block = bool(factors.get("news_block", False))
+    news_note = ""
+    news_penalty = 0.0
+    if news_block:
+        news_penalty = 0.8
+        news_note = " ⚠️ News risk: higher volatility/false moves possible (execution layer decides)."
+
     session_name = str(factors.get("session_name", ""))
-    session_valid = bool(factors.get("session_valid", True))
     is_asia = "asia" in session_name.lower()
+
+    # ✅ NEW: use your new flags from app.py
+    session_valid_sniper = bool(factors.get("session_valid_sniper", True))
+    session_valid_continuation = bool(factors.get("session_valid_continuation", True))
 
     po3_phase = str(factors.get("po3_phase", "ACCUMULATION")).upper()
     accumulation_detected = bool(factors.get("accumulation_detected", False))
@@ -108,26 +119,19 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
     structure_ok = bool(factors.get("structure_ok", False))
 
     score_breakdown = build_score_breakdown(profile, factors)
-    confidence = score_breakdown["total_score"]
+
+    # Base confidence from model, then apply news penalty (caution-only)
+    confidence_raw = float(score_breakdown["total_score"])
+    confidence = clamp(confidence_raw - news_penalty, 0.0, 10.0)
+    score_breakdown["news_penalty"] = news_penalty
+    score_breakdown["total_score"] = confidence  # keep UI consistent
 
     base_meta = {
         "po3_phase": po3_phase,
         "setup_type": "NONE",
         "model": "PO3_SNIPER_FIRST",
+        "news_block": bool(news_block),
     }
-
-    if news_block:
-        return Decision(
-            symbol,
-            po3_bias,
-            "standby",
-            confidence,
-            "DO NOTHING",
-            "High-impact news window: block new entries for ±15 minutes.",
-            {},
-            score=confidence,
-            meta=base_meta,
-        )
 
     if rr < MIN_RR:
         return Decision(
@@ -136,25 +140,26 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
             "standby",
             confidence,
             "WAIT",
-            "RR below minimum 2.0 requirement.",
+            "RR below minimum 2.0 requirement." + news_note,
             {},
             score=confidence,
             meta=base_meta,
         )
 
-    # Sniper requirements (all required)
+    # -----------------------
+    # Sniper requirements
+    # -----------------------
     sniper_ready = (
         accumulation_detected
         and liquidity_sweep
         and agreement_reclaim
         and mss_shift
         and entry_quality
-        and session_valid
+        and session_valid_sniper
         and rr >= MIN_RR
-        and not news_block
     )
 
-    # Asia is allowed but stricter for sniper setups.
+    # Asia: you already enforce stricter behavior; and app.py sets session_valid_sniper False in Asia
     if is_asia:
         sniper_ready = sniper_ready and htf_alignment and confidence >= 9.0
 
@@ -174,18 +179,20 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
             "sniper",
             confidence,
             action,
-            "PO3 sniper setup confirmed (accumulation → sweep → agreement reclaim → MSS).",
+            "PO3 sniper setup confirmed (accumulation → sweep → agreement reclaim → MSS)." + news_note,
             trade_plan,
             score=confidence,
             meta=meta,
         )
 
-    # Continuation requirements (lighter but controlled)
+    # -----------------------
+    # Continuation requirements
+    # -----------------------
     continuation_ready = (
         distribution_active
         and structure_ok
         and entry_quality
-        and session_valid
+        and session_valid_continuation
         and rr >= MIN_RR
         and po3_bias in ("bullish", "bearish")
     )
@@ -208,7 +215,7 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
             "continuation",
             confidence,
             action,
-            "Controlled continuation: distribution active with intact structure.",
+            "Controlled continuation: distribution active with intact structure." + news_note,
             trade_plan,
             score=confidence,
             meta=meta,
@@ -226,7 +233,7 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
         "standby",
         confidence,
         "WATCH",
-        commentary,
+        commentary + news_note,
         {},
         score=confidence,
         meta=base_meta,

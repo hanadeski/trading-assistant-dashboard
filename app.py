@@ -133,12 +133,20 @@ def build_snapshot():
             return "New York"
         return "Asia / Off-hours"
 
-    def session_alignment_for_setup(sess: str, setup_type: str) -> bool:
-        s = sess.lower()
+    # ✅ NEW: sniper vs continuation session validity
+    def session_valid_flags(sess: str):
+        s = (sess or "").lower()
         if "asia" in s:
-            # Asia allowed, but sniper setups are stricter/rarer.
-            return setup_type != "SNIPER"
-        return True
+            # Asia allowed, but sniper is stricter/rarer
+            return {
+                "session_valid_sniper": False,
+                "session_valid_continuation": True,
+            }
+        # London / NY / overlap
+        return {
+            "session_valid_sniper": True,
+            "session_valid_continuation": True,
+        }
 
     def current_4h_open(df_4h: pd.DataFrame, fallback_price: float) -> float:
         if df_4h is not None and not df_4h.empty and "open" in df_4h.columns:
@@ -191,9 +199,16 @@ def build_snapshot():
     now_utc = datetime.now(timezone.utc)
     session_label = session_name(now_utc)
 
+    # ✅ compute once per snapshot (same for all symbols)
+    flags = session_valid_flags(session_label)
+    session_valid_sniper = flags["session_valid_sniper"]
+    session_valid_continuation = flags["session_valid_continuation"]
+    # keep looser alignment for confidence math
+    session_alignment = session_valid_continuation
+
     news_block = False
     try:
-        # block entries around high-impact releases; accumulation can still form.
+        # you later said “don’t block, only caution” — we’ll change that in engine/scoring.py
         news_block = len(get_high_impact_news()) > 0
     except Exception:
         news_block = False
@@ -222,10 +237,11 @@ def build_snapshot():
                 "agreement_reclaim": False,
                 "mss_shift": False,
                 "entry_quality": False,
-                "session_alignment": False,
+                "session_alignment": session_alignment,
+                "session_valid_sniper": session_valid_sniper,
+                "session_valid_continuation": session_valid_continuation,
                 "htf_alignment": False,
                 "distribution_active": False,
-                "session_valid": False,
                 "session_name": session_label,
                 "session_boost": 0.0,
                 "structure_ok": False,
@@ -351,8 +367,6 @@ def build_snapshot():
             htf_bias = "neutral"
 
         htf_alignment = htf_bias in ("neutral", po3_bias)
-        session_valid = session_alignment_for_setup(session_label, "CONTINUATION")
-        session_alignment = session_valid
 
         # PO3 active per confidence model.
         po3_active = liquidity_sweep and mss_shift
@@ -377,9 +391,10 @@ def build_snapshot():
             "mss_shift": mss_shift,
             "entry_quality": entry_quality,
             "session_alignment": session_alignment,
+            "session_valid_sniper": session_valid_sniper,
+            "session_valid_continuation": session_valid_continuation,
             "htf_alignment": htf_alignment,
             "distribution_active": distribution_active,
-            "session_valid": session_valid,
             "session_name": session_label,
             "session_boost": 0.5 if sym in TOP_PRIORITY_UNIVERSE else 0.3,
             "structure_ok": structure_ok,

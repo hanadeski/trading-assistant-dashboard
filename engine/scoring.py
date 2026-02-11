@@ -3,10 +3,9 @@ from typing import Dict
 import pandas as pd
 from engine.fvg import detect_fvgs
 
-# --- Global thresholds (premium mode) ---
 SETUP_SCORE_THRESHOLD = 6.6
-EXECUTION_SCORE_THRESHOLD = 8.2
-EXECUTION_CONFIDENCE_MIN = 8.2   # raised for premium mode
+EXECUTION_SCORE_THRESHOLD = 7.8
+EXECUTION_CONFIDENCE_MIN = 7.5
 
 @dataclass
 class Decision:
@@ -19,19 +18,14 @@ class Decision:
     trade_plan: Dict
     score: float = 0.0
 
-    # Risk / sizing
+    # --- Risk / sizing (Step 5B) ---
     risk_pct: float = 0.0
     size: float = 0.0
     meta: Dict = field(default_factory=dict)
 
-
 def clamp(x: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, x))
 
-
-# =========================================================
-# SCORE BREAKDOWN
-# =========================================================
 def build_score_breakdown(profile, factors: Dict) -> Dict[str, float]:
     bias = factors.get("bias", "neutral")
     session_boost = float(factors.get("session_boost", 0.0))
@@ -44,42 +38,28 @@ def build_score_breakdown(profile, factors: Dict) -> Dict[str, float]:
     regime = factors.get("regime", "range")
     fvg_score = float(factors.get("fvg_score", 0.0))
 
-    # Base components
     bias_score = 2.5 if bias in ("bullish", "bearish") else 0.0
     structure_score = 2.5 if structure_ok else 0.0
     liquidity_score = 2.5 if liquidity_ok else 0.0
     session_score = 2.0 * session_boost
-    rr_score = clamp(rr - 1.0, 0.0, 3.0)
+    rr_score = clamp((rr - 1.0), 0.0, 3.0)
 
-    # Volatility penalty
+    volatility_penalty = 0.0
     if volatility_risk == "high":
         volatility_penalty = -0.2
     elif volatility_risk == "extreme":
         volatility_penalty = -0.6
-    else:
-        volatility_penalty = 0.0
 
-    # News penalty
+    news_penalty = 0.0
     if news_risk == "against":
         news_penalty = -2.0
     elif news_risk == "near":
         news_penalty = -0.5
-    else:
-        news_penalty = 0.0
 
-    # FVG penalty
-    fvg_penalty = 0.0
-    if fvg_score > 0.0:
-        fvg_penalty = -min(0.6, 0.2 + 0.6 * fvg_score)
-
-    # HTF conflict
     htf_penalty = -1.0 if htf_bias not in ("neutral", bias) else 0.0
+    regime_penalty = 0.0
 
-    # Regime penalty
-    regime_penalty = -0.5 if regime == "range" else 0.0
-
-    # Total score
-    score = clamp(
+    score = (
         bias_score
         + structure_score
         + liquidity_score
@@ -87,12 +67,10 @@ def build_score_breakdown(profile, factors: Dict) -> Dict[str, float]:
         + rr_score
         + volatility_penalty
         + news_penalty
-        + fvg_penalty
         + htf_penalty
-        + regime_penalty,
-        0.0,
-        10.0,
+        + regime_penalty
     )
+    score = clamp(score, 0.0, 10.0)
 
     return {
         "bias_score": bias_score,
@@ -102,52 +80,31 @@ def build_score_breakdown(profile, factors: Dict) -> Dict[str, float]:
         "rr_score": rr_score,
         "volatility_penalty": volatility_penalty,
         "news_penalty": news_penalty,
-        "fvg_penalty": fvg_penalty,
         "htf_penalty": htf_penalty,
         "regime_penalty": regime_penalty,
         "total_score": score,
     }
 
-
-# =========================================================
-# DECISION ENGINE (PREMIUM MODE)
-# =========================================================
 def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
     bias = factors.get("bias", "neutral")
+    session_boost = float(factors.get("session_boost", 0.0))
     liquidity_ok = bool(factors.get("liquidity_ok", False))
     structure_ok = bool(factors.get("structure_ok", False))
     rr = float(factors.get("rr", 0.0))
     certified = bool(factors.get("certified", False))
+    volatility_risk = factors.get("volatility_risk", "normal")
     news_risk = factors.get("news_risk", "none")
     htf_bias = factors.get("htf_bias", "neutral")
     regime = factors.get("regime", "range")
+    setup_score_threshold = float(factors.get("setup_score_threshold", SETUP_SCORE_THRESHOLD))
+    execution_score_threshold = float(
+        factors.get("execution_score_threshold", EXECUTION_SCORE_THRESHOLD)
+    )
+    execution_confidence_min = float(
+        factors.get("execution_confidence_min", EXECUTION_CONFIDENCE_MIN)
+    )
 
-    near_fvg = bool(factors.get("near_fvg", False))
-    fvg_score = float(factors.get("fvg_score", 0.0))
-    fvg_gate = near_fvg and (fvg_score >= 0.6)
-
-    rr_required = 2.5  # strict premium RR
-
-    # Base scoring
-    score_breakdown = build_score_breakdown(profile, factors)
-    score = score_breakdown["total_score"]
-
-    # Confidence calibration (premium)
-    if score < 5.0:
-        confidence = score
-    elif score < 7.0:
-        confidence = score * 0.9
-    elif score < 9.0:
-        confidence = score * 0.95
-    else:
-        confidence = min(score, 10.0)
-
-    mode = profile.aggression_default
-    action = "WAIT"
-    commentary = "Conditions developing."
-    trade_plan = {}
-
-    # Hard stop: hostile news
+    # Hard caps: never trade in hostile regimes
     if news_risk == "against":
         return Decision(
             symbol, bias, "standby", 0.0,
@@ -157,24 +114,61 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
             score=0.0
         )
 
-    # Commentary
+    # FVG context
+    near_fvg = bool(factors.get("near_fvg", False))
+    fvg_score = float(factors.get("fvg_score", 0.0))
+    fvg_gate = near_fvg and (fvg_score >= 0.6)
+    # --- RR thresholds ---
+    rr_min = profile.rr_min
+    rr_min_cert = profile.certified_rr_min
+    rr_required = 2.5
+
+    # ------------------------
+    # Base scoring
+    # ------------------------
+    score_breakdown = build_score_breakdown(profile, factors)
+    score = score_breakdown["total_score"]
+    # --- Confidence calibration ---
+    # Ensure scores map cleanly to decision strength
+    if score < 5.0:
+        confidence = score
+    elif score < 7.0:
+        confidence = score * 0.9
+    elif score < 9.0:
+        confidence = score * 0.95
+    else:
+        confidence = min(score, 10.0)
+    # ------------------------
+    # Decision defaults
+    # ------------------------
+    mode = profile.aggression_default
+    action = "WAIT"
+    commentary = "Conditions developing."
+    trade_plan: Dict = {}
+
+    # --- FVG messaging (4.5B) ---
     if fvg_score >= 0.6:
-        commentary += " Strong FVG context."
+        commentary += " Strong FVG context nearby—expect volatility; reduce size and wait for clean confirmation."
     elif fvg_score >= 0.3:
-        commentary += " Mild FVG context."
+        commentary += " Mild FVG context nearby—expect reaction; be selective on entry."
 
     if near_fvg:
-        commentary += " Price near FVG; expect reactions."
+        commentary += " Price is near a Fair Value Gap (FVG); expect reactions and fakeouts—wait for confirmation."
 
     if htf_bias not in ("neutral", bias):
-        commentary += " HTF conflict present."
-
+        commentary += " Higher-timeframe bias conflicts; wait for alignment."
     if regime == "range":
-        commentary += " Range-bound regime."
+        commentary += " Range-bound regime detected; demand cleaner trend confirmation."
 
-    # -----------------------------------------------------
-    # PREMIUM MODE: CORE-ONLY EXECUTION
-    # -----------------------------------------------------
+    # ------------------------
+    # Decision ladder
+    # ------------------------
+    if score < 5.0:
+        return Decision(
+            symbol, bias, "standby", confidence, "DO NOTHING",
+            "No edge: choppy or mid-range conditions.", {},
+            score=score
+        )
 
     core_rules_ok = (
         bias in ("bullish", "bearish")
@@ -183,7 +177,7 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
         and certified
         and fvg_gate
         and rr >= rr_required
-        and confidence >= EXECUTION_CONFIDENCE_MIN
+        and confidence >= 8.0
         and news_risk != "against"
     )
 
@@ -197,17 +191,107 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
             "rr": rr,
         }
         return Decision(
-            symbol, bias, mode, confidence, action,
-            "Premium core setup aligned (bias/structure/liquidity/FVG/RR).",
+            symbol,
+            bias,
+            mode,
+            confidence,
+            action,
+            "Core setup aligned (bias/structure/liquidity/RR).",
             trade_plan,
             score=score,
         )
 
-    # Everything else becomes WAIT
+    # -----------------------------
+    # Decision ladder (Balanced)
+    # -----------------------------
+    # 1) Low score = WATCH
+    if score < setup_score_threshold:
+        return Decision(
+            symbol, bias, "conservative", confidence,
+            "WATCH",
+            "Watch: bias exists but confirmation is incomplete.",
+            {},
+            score=score
+        )
+
+    # 2) Mid score = WAIT (only if structure + RR are decent), else WATCH
+    if score < execution_score_threshold:
+        # Balanced: require RR + structure for "WAIT"
+        if rr >= rr_min and structure_ok and bias in ("bullish", "bearish"):
+            return Decision(
+                symbol, bias, mode, confidence,
+                "WAIT",
+                "Good setup forming; wait for a cleaner trigger/entry.",
+                {},
+                score=score
+            )
+
+        return Decision(
+            symbol, bias, mode, confidence,
+            "WATCH",
+            "Conditions improving, but missing liquidity/structure/RR to progress.",
+            {},
+            score=score
+        )
+
+    # 3) High score zone: decide whether we can trigger
+    mode = "aggressive" if certified else "balanced"
+
+    # RR gate: use rr_min_cert only if certified, else rr_min
+    rr_needed = rr_min_cert if certified else rr_min
+    rr_ok = rr >= rr_needed
+
+    # Balanced trigger:
+    # Must have structure + RR + direction + liquidity to trade
+    # If volatility is high, we cap at WAIT (even if everything else is good)
+    if rr_ok and structure_ok and bias in ("bullish", "bearish"):
+
+        if not liquidity_ok:
+            return Decision(
+                symbol, bias, mode, confidence,
+                "WAIT",
+                "High score, but liquidity not confirmed; wait for cleaner conditions.",
+                {},
+                score=score
+            )
+
+        # FVG is a strict quality gate in higher-score branches.
+        if not fvg_gate:
+            return Decision(
+                symbol, bias, mode, confidence,
+                "WAIT",
+                "Setup is strong, but FVG context isn’t strong enough; wait for cleaner confirmation/entry.",
+                {},
+                score=score
+            )
+
+        if confidence < execution_confidence_min:
+            return Decision(
+                symbol, bias, mode, confidence,
+                "WAIT",
+                "Setup forming, but confidence below execution threshold.",
+                {},
+                score=score
+            )
+
+        action = "BUY NOW" if bias == "bullish" else "SELL NOW"
+        trade_plan = {
+            "entry": factors.get("entry", "TBD"),
+            "stop": factors.get("stop", "TBD"),
+            "tp1": factors.get("tp1", "TBD"),
+            "tp2": factors.get("tp2", "TBD"),
+            "rr": rr,
+        }
+        return Decision(
+            symbol, bias, mode, confidence, action,
+            "High-confidence setup: conditions align strongly.", trade_plan,
+            score=score
+        )
+
     return Decision(
         symbol, bias, mode, confidence,
         "WAIT",
-        "Conditions improving but not premium-grade.",
+        "No actionable setup yet; wait for confirmation.",
         {},
         score=score
     )

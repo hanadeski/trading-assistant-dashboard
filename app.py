@@ -226,9 +226,9 @@ def build_snapshot():
         body_ok = c3_body >= 0.35 * c3_rng
 
         if po3_bias == "bullish":
-            expands = (_f(c3["close"]) > _f(c2["high"])) and body_ok
+            expands = (_f(c3["high"]) > _f(c2["high"])) and body_ok
         elif po3_bias == "bearish":
-            expands = (_f(c3["close"]) < _f(c2["low"])) and body_ok
+            expands = (_f(c3["low"]) < _f(c2["low"])) and body_ok
         else:
             return False, "none"
 

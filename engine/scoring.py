@@ -3,7 +3,7 @@ from typing import Dict
 
 
 SETUP_SCORE_THRESHOLD = 7.0
-EXECUTION_CONFIDENCE_MIN = 8.0   # ✅ was 8.5
+EXECUTION_CONFIDENCE_MIN = 8.0
 MIN_RR = 2.0
 
 
@@ -43,10 +43,7 @@ def build_score_breakdown(profile, factors: Dict) -> Dict[str, float]:
     liquidity_sweep = bool(factors.get("liquidity_sweep", False))
     agreement_reclaim = bool(factors.get("agreement_reclaim", False))
     mss_shift = bool(factors.get("mss_shift", False))
-
-    # ✅ NEW: entry confirmation replaces entry_quality (EMA/FVG no longer required)
     entry_confirmed = bool(factors.get("entry_confirmed", False))
-
     session_alignment = bool(factors.get("session_alignment", False))
     htf_alignment = bool(factors.get("htf_alignment", False))
 
@@ -70,7 +67,6 @@ def build_score_breakdown(profile, factors: Dict) -> Dict[str, float]:
         10.0,
     )
 
-    # Compatibility keys kept for existing UI components.
     return {
         "po3_score": po3_score,
         "sweep_score": sweep_score,
@@ -84,7 +80,7 @@ def build_score_breakdown(profile, factors: Dict) -> Dict[str, float]:
         "liquidity_score": 0.0,
         "rr_score": 0.0,
         "volatility_penalty": 0.0,
-        "news_penalty": 0.0,  # ✅ always 0 now
+        "news_penalty": 0.0,
         "htf_penalty": 0.0,
         "regime_penalty": 0.0,
         "total_score": total_score,
@@ -95,11 +91,11 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
     po3_bias = factors.get("po3_bias", factors.get("bias", "neutral"))
     rr = float(factors.get("rr", 0.0))
 
-    # ✅ News: no penalty, no block. Only a warning note.
+    # News = warning only, never blocks
     news_block = bool(factors.get("news_block", False))
     news_note = " ⚠️ News risk: high-impact events nearby." if news_block else ""
 
-    # ✅ Session flags from app.py (but no Asia strict logic anymore)
+    # Session flags
     session_valid_sniper = bool(factors.get("session_valid_sniper", True))
     session_valid_continuation = bool(factors.get("session_valid_continuation", True))
 
@@ -109,16 +105,18 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
     agreement_reclaim = bool(factors.get("agreement_reclaim", False))
     mss_shift = bool(factors.get("mss_shift", False))
 
-    # ✅ NEW: your entry model (wick -> expansion) comes from app.py
     entry_confirmed = bool(factors.get("entry_confirmed", False))
     entry_confirm_type = str(factors.get("entry_confirm_type", "none"))
 
     htf_alignment = bool(factors.get("htf_alignment", False))
     distribution_active = bool(factors.get("distribution_active", False))
+
+    # ✅ NEW: better continuation structure (fallback to old structure_ok if missing)
     structure_ok = bool(factors.get("structure_ok", False))
+    structure_ok_cont = bool(factors.get("structure_ok_continuation", structure_ok))
 
     score_breakdown = build_score_breakdown(profile, factors)
-    confidence = float(score_breakdown["total_score"])  # ✅ no news penalty
+    confidence = float(score_breakdown["total_score"])
 
     base_meta = {
         "po3_phase": po3_phase,
@@ -126,6 +124,8 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
         "model": "PO3_SNIPER_FIRST",
         "news_flag": bool(news_block),
         "entry_confirm_type": entry_confirm_type,
+        "htf_alignment": bool(htf_alignment),
+        "structure_ok_continuation": bool(structure_ok_cont),
     }
 
     if rr < MIN_RR:
@@ -142,19 +142,24 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
         )
 
     # -----------------------
-    # Sniper requirements (PO3)
+    # SNIPER (reversal after manipulation)
+    # Only valid in ACCUMULATION / MANIPULATION phases
     # -----------------------
+    sniper_phase_ok = po3_phase in ("ACCUMULATION", "MANIPULATION")
+
     sniper_ready = (
-        accumulation_detected
+        sniper_phase_ok
+        and accumulation_detected
         and liquidity_sweep
         and agreement_reclaim
         and mss_shift
         and entry_confirmed
         and session_valid_sniper
         and rr >= MIN_RR
+        and po3_bias in ("bullish", "bearish")
     )
 
-    if sniper_ready and confidence >= EXECUTION_CONFIDENCE_MIN and po3_bias in ("bullish", "bearish"):
+    if sniper_ready and confidence >= EXECUTION_CONFIDENCE_MIN:
         action = "BUY NOW" if po3_bias == "bullish" else "SELL NOW"
         trade_plan = {
             "entry": factors.get("entry", "TBD"),
@@ -170,18 +175,21 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
             "sniper",
             confidence,
             action,
-            f"PO3 sniper confirmed ({entry_confirm_type}): accumulation → sweep → agreement reclaim → MSS." + news_note,
+            f"PO3 SNIPER ({entry_confirm_type}): accumulation → sweep → agreement reclaim → MSS." + news_note,
             trade_plan,
             score=confidence,
             meta=meta,
         )
 
     # -----------------------
-    # Continuation requirements
+    # CONTINUATION (trend leg already moving)
+    # Only valid in DISTRIBUTION phase
     # -----------------------
+    continuation_phase_ok = (po3_phase == "DISTRIBUTION") and distribution_active
+
     continuation_ready = (
-        distribution_active
-        and structure_ok
+        continuation_phase_ok
+        and structure_ok_cont
         and entry_confirmed
         and session_valid_continuation
         and rr >= MIN_RR
@@ -197,26 +205,33 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
             "tp2": factors.get("tp2", "TBD"),
             "rr": rr,
         }
+
+        htf_tag = " (HTF aligned)" if htf_alignment else " (HTF not aligned)"
         meta = {**base_meta, "setup_type": "CONTINUATION"}
+
         return Decision(
             symbol,
             po3_bias,
             "continuation",
             confidence,
             action,
-            f"Continuation confirmed ({entry_confirm_type}): distribution active with intact structure." + news_note,
+            f"CONTINUATION ({entry_confirm_type}): distribution active + structure OK{htf_tag}." + news_note,
             trade_plan,
             score=confidence,
             meta=meta,
         )
 
-    commentary = "No clean PO3 narrative yet (no forced trades)."
+    # -----------------------
+    # STANDBY messaging
+    # -----------------------
     if not liquidity_sweep:
         commentary = "Waiting for valid liquidity sweep (Phase 2 manipulation)."
     elif liquidity_sweep and not mss_shift:
         commentary = "Sweep detected; waiting for 15m MSS and displacement confirmation."
-    elif liquidity_sweep and mss_shift and not entry_confirmed:
+    elif (liquidity_sweep and mss_shift) and not entry_confirmed:
         commentary = "PO3 structure present; waiting for entry confirmation (wick → expansion / CISD)."
+    else:
+        commentary = "No clean PO3 narrative yet (no forced trades)."
 
     return Decision(
         symbol,

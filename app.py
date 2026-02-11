@@ -501,13 +501,8 @@ if "snapshot_ready" not in st.session_state:
 
 SNAPSHOT_INTERVAL_SECS = 30
 now = int(time.time())
-should_snapshot = (
-    LIVE_DATA
-    and (
-        not st.session_state.snapshot_ready
-        or (now - st.session_state.last_snapshot_ts) >= SNAPSHOT_INTERVAL_SECS
-    )
-)
+should_snapshot = LIVE_DATA
+
 
     if LIVE_DATA:
     with st.spinner("Building snapshot (live data)..."):

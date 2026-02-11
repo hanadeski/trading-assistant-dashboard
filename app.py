@@ -133,16 +133,8 @@ def build_snapshot():
             return "New York"
         return "Asia / Off-hours"
 
-    # ✅ NEW: sniper vs continuation session validity
+    # ✅ Asia NOT stricter anymore
     def session_valid_flags(sess: str):
-        s = (sess or "").lower()
-        if "asia" in s:
-            # Asia allowed, but sniper is stricter/rarer
-            return {
-                "session_valid_sniper": False,
-                "session_valid_continuation": True,
-            }
-        # London / NY / overlap
         return {
             "session_valid_sniper": True,
             "session_valid_continuation": True,
@@ -196,6 +188,62 @@ def build_snapshot():
         last_close = float(df_15m["close"].iloc[-1])
         return last_close > swing_high, last_close < swing_low
 
+    def detect_entry_confirmation(df_15m: pd.DataFrame, po3_bias: str):
+        """
+        Entry Confirmation (your method):
+        - Candle2 = df[-2] wick candle
+        - Candle3 = df[-1] expansion candle
+
+        Reversal→Expansion: candle2 small wick ratio, candle3 expands in direction
+        Continuation Expansion: candle2 large wick ratio, candle3 expands in direction
+        """
+        if df_15m is None or df_15m.empty or len(df_15m) < 5:
+            return False, "none"
+
+        c2 = df_15m.iloc[-2]
+        c3 = df_15m.iloc[-1]
+
+        def _f(x):
+            try:
+                return float(x)
+            except Exception:
+                return 0.0
+
+        def body(c):
+            return abs(_f(c["close"]) - _f(c["open"]))
+
+        def rng(c):
+            return max(_f(c["high"]) - _f(c["low"]), 1e-9)
+
+        def upper_wick(c):
+            return _f(c["high"]) - max(_f(c["open"]), _f(c["close"]))
+
+        def lower_wick(c):
+            return min(_f(c["open"]), _f(c["close"])) - _f(c["low"])
+
+        c2_rng = rng(c2)
+        c3_rng = rng(c3)
+        c2_wick_ratio = (upper_wick(c2) + lower_wick(c2)) / c2_rng
+
+        c3_body = body(c3)
+        body_ok = c3_body >= 0.35 * c3_rng
+
+        if po3_bias == "bullish":
+            expands = (_f(c3["close"]) > _f(c2["high"])) and body_ok
+        elif po3_bias == "bearish":
+            expands = (_f(c3["close"]) < _f(c2["low"])) and body_ok
+        else:
+            return False, "none"
+
+        if not expands:
+            return False, "none"
+
+        if c2_wick_ratio <= 0.55:
+            return True, "reversal_expansion"
+        if c2_wick_ratio >= 0.70:
+            return True, "continuation_expansion"
+        return True, "expansion"
+
     now_utc = datetime.now(timezone.utc)
     session_label = session_name(now_utc)
 
@@ -203,12 +251,10 @@ def build_snapshot():
     flags = session_valid_flags(session_label)
     session_valid_sniper = flags["session_valid_sniper"]
     session_valid_continuation = flags["session_valid_continuation"]
-    # keep looser alignment for confidence math
-    session_alignment = session_valid_continuation
+    session_alignment = session_valid_continuation  # used for confidence scoring
 
     news_block = False
     try:
-        # you later said “don’t block, only caution” — we’ll change that in engine/scoring.py
         news_block = len(get_high_impact_news()) > 0
     except Exception:
         news_block = False
@@ -236,7 +282,14 @@ def build_snapshot():
                 "liquidity_sweep": False,
                 "agreement_reclaim": False,
                 "mss_shift": False,
+
+                # ✅ new entry confirmation keys
+                "entry_confirmed": False,
+                "entry_confirm_type": "none",
+
+                # kept for UI compatibility
                 "entry_quality": False,
+
                 "session_alignment": session_alignment,
                 "session_valid_sniper": session_valid_sniper,
                 "session_valid_continuation": session_valid_continuation,
@@ -345,13 +398,16 @@ def build_snapshot():
         else:
             tp2 = "TBD"
 
+        # FVG informational only (not a gate)
         fvg_ctx = compute_fvg_context(df, lookback=160, max_show=3)
         near_fvg = bool(fvg_ctx.get("near_fvg", False))
         fvg_score = float(fvg_ctx.get("fvg_score", 0.0))
 
-        # Entry quality: either FVG context or pullback to EMA20 area.
-        ema20 = float(ema_fast.iloc[-1])
-        entry_quality = near_fvg or (abs(entry - ema20) <= (entry * 0.0015))
+        # ✅ Entry confirmation (wick -> expansion)
+        entry_confirmed, entry_confirm_type = detect_entry_confirmation(df, po3_bias)
+
+        # Keep entry_quality for UI compatibility only
+        entry_quality = entry_confirmed
 
         if htf_df is not None and not htf_df.empty and len(htf_df) >= 20:
             htf_close = htf_df["close"]
@@ -376,7 +432,7 @@ def build_snapshot():
             and liquidity_sweep
             and agreement_reclaim
             and mss_shift
-            and entry_quality
+            and entry_confirmed
             and rr >= 2.0
         )
 
@@ -389,7 +445,14 @@ def build_snapshot():
             "liquidity_sweep": liquidity_sweep,
             "agreement_reclaim": agreement_reclaim,
             "mss_shift": mss_shift,
+
+            # ✅ NEW keys used by engine/scoring.py
+            "entry_confirmed": entry_confirmed,
+            "entry_confirm_type": entry_confirm_type,
+
+            # kept for any older UI references
             "entry_quality": entry_quality,
+
             "session_alignment": session_alignment,
             "session_valid_sniper": session_valid_sniper,
             "session_valid_continuation": session_valid_continuation,
@@ -401,8 +464,11 @@ def build_snapshot():
             "liquidity_ok": liquidity_ok,
             "certified": certified,
             "rr": rr,
+
+            # FVG informational only
             "near_fvg": near_fvg,
             "fvg_score": fvg_score,
+
             "df": df,
             "htf_bias": htf_bias,
             "news_risk": "against" if news_block else "none",

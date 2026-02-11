@@ -38,6 +38,9 @@ def format_trade_alert(decision) -> str:
     conf = float(getattr(decision, "confidence", 0.0))
     bias = getattr(decision, "bias", "neutral").capitalize()
 
+    meta = getattr(decision, "meta", {}) or {}
+    setup_type = str(meta.get("setup_type", "NONE")).upper()
+
     tp = getattr(decision, "trade_plan", {}) or {}
     entry = tp.get("entry", getattr(decision, "entry", "N/A"))
     stop  = tp.get("stop",  getattr(decision, "stop",  "N/A"))
@@ -52,7 +55,15 @@ def format_trade_alert(decision) -> str:
     if tp2 not in (None, "", "N/A"):
         tp_line += f" / {tp2}"
 
+    if setup_type == "SNIPER":
+        header = "🚨 SNIPER"
+    elif setup_type == "CONTINUATION":
+        header = "⚡ CONTINUATION"
+    else:
+        header = "📡 SIGNAL"
+
     return (
+        f"{header}\n"
         f"{symbol} — {action}\n"
         f"Entry {entry}\n"
         f"SL {stop}\n"
@@ -60,6 +71,7 @@ def format_trade_alert(decision) -> str:
         f"RR {rr} | Conf {conf:.1f} | Bias {bias}"
         f"{reason_line}"
     )
+
 
 ALLOWED_ACTIONS = {"BUY NOW", "SELL NOW"}
 MIN_CONFIDENCE = 9.0
@@ -108,16 +120,19 @@ def send_trade_alert_once(decision) -> bool:
     if now - last_ts < COOLDOWN_SEC:
         return False
 
-    # ---- Duplicate protection (symbol + action) ----
-    key = f"tg_sent_{symbol}_{action}"
-    if st.session_state.get(key):
+    key = f"{symbol}:{action}"
+
+    # init cache
+    if "sent_alerts" not in st.session_state:
+        st.session_state["sent_alerts"] = set()
+
+    # one-time key guard per app lifecycle
+    if key in st.session_state["sent_alerts"]:
         return False
 
-    message = format_trade_alert(decision)
-    ok = send_telegram_message(message)
-
+    msg = format_trade_alert(decision)
+    ok = send_telegram_message(msg)
     if ok:
-        st.session_state[key] = True
+        st.session_state["sent_alerts"].add(key)
         st.session_state[cool_key] = now
-
     return ok

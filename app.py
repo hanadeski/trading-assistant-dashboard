@@ -113,9 +113,6 @@ def build_snapshot():
     symbols = [p.symbol for p in profiles]
     factors_by_symbol = {}
 
-    def ema(series, n):
-        return series.ewm(span=n, adjust=False).mean()
-
     def atr(df, n=14):
         high, low, close = df["high"], df["low"], df["close"]
         tr = (high - low).to_frame("hl")
@@ -244,10 +241,76 @@ def build_snapshot():
             return True, "continuation_expansion"
         return True, "expansion"
 
+    def price_action_bias(df_tf: pd.DataFrame) -> str:
+        """
+        NO EMA bias:
+        - bullish if recent highs/lows progress up + close progresses up
+        - bearish if recent highs/lows progress down + close progresses down
+        else neutral
+        """
+        if df_tf is None or df_tf.empty or len(df_tf) < 50:
+            return "neutral"
+
+        recent = df_tf.tail(24)         # last ~6 hours (15m) or last 4 days (4h tail depends on tf)
+        prev = df_tf.iloc[-48:-24]      # window before
+        if prev is None or len(prev) < 10:
+            prev = df_tf.tail(48)
+
+        r_high, r_low = float(recent["high"].max()), float(recent["low"].min())
+        p_high, p_low = float(prev["high"].max()), float(prev["low"].min())
+
+        c0 = float(recent["close"].iloc[0])
+        c1 = float(recent["close"].iloc[-1])
+
+        # directional progress
+        up = (r_high > p_high) and (r_low > p_low) and (c1 > c0)
+        dn = (r_high < p_high) and (r_low < p_low) and (c1 < c0)
+
+        if up:
+            return "bullish"
+        if dn:
+            return "bearish"
+        return "neutral"
+
+    def structure_ok_continuation(df_15m: pd.DataFrame, po3_bias: str) -> bool:
+        """
+        Continuation structure (NO EMA):
+        - requires movement + directional progress
+        - avoids dead/chop but doesn't choke healthy trends
+        """
+        if df_15m is None or df_15m.empty or len(df_15m) < 60:
+            return False
+
+        recent = df_15m.tail(24)      # ~6 hours
+        prev = df_15m.iloc[-48:-24]
+        if prev is None or len(prev) < 10:
+            prev = df_15m.tail(48)
+
+        recent_high = float(recent["high"].max())
+        recent_low = float(recent["low"].min())
+        prev_high = float(prev["high"].max())
+        prev_low = float(prev["low"].min())
+
+        rng = recent_high - recent_low
+        last_close = float(df_15m["close"].iloc[-1])
+        if last_close <= 0:
+            return False
+
+        # Minimum movement: 0.06% of price (tunable)
+        min_move = last_close * 0.0006
+        if rng < min_move:
+            return False
+
+        # Directional progress: new high (bull) / new low (bear)
+        if po3_bias == "bullish":
+            return (recent_high > prev_high) or (float(recent["close"].iloc[-1]) > float(recent["close"].iloc[0]))
+        if po3_bias == "bearish":
+            return (recent_low < prev_low) or (float(recent["close"].iloc[-1]) < float(recent["close"].iloc[0]))
+        return False
+
     now_utc = datetime.now(timezone.utc)
     session_label = session_name(now_utc)
 
-    # ✅ compute once per snapshot (same for all symbols)
     flags = session_valid_flags(session_label)
     session_valid_sniper = flags["session_valid_sniper"]
     session_valid_continuation = flags["session_valid_continuation"]
@@ -282,14 +345,9 @@ def build_snapshot():
                 "liquidity_sweep": False,
                 "agreement_reclaim": False,
                 "mss_shift": False,
-
-                # ✅ new entry confirmation keys
                 "entry_confirmed": False,
                 "entry_confirm_type": "none",
-
-                # kept for UI compatibility
-                "entry_quality": False,
-
+                "entry_quality": False,  # UI compatibility
                 "session_alignment": session_alignment,
                 "session_valid_sniper": session_valid_sniper,
                 "session_valid_continuation": session_valid_continuation,
@@ -298,6 +356,7 @@ def build_snapshot():
                 "session_name": session_label,
                 "session_boost": 0.0,
                 "structure_ok": False,
+                "structure_ok_continuation": False,
                 "liquidity_ok": False,
                 "certified": False,
                 "rr": 0.0,
@@ -315,16 +374,8 @@ def build_snapshot():
             }
             continue
 
-        c = df["close"]
-        ema_fast = ema(c, 20)
-        ema_slow = ema(c, 50)
-
-        if ema_fast.iloc[-1] > ema_slow.iloc[-1]:
-            trend_bias = "bullish"
-        elif ema_fast.iloc[-1] < ema_slow.iloc[-1]:
-            trend_bias = "bearish"
-        else:
-            trend_bias = "neutral"
+        # ---------- Bias (NO EMA) ----------
+        trend_bias = price_action_bias(df)
 
         accumulation_detected = detect_accumulation(htf_df)
         sweep_above, sweep_below = detect_sweep(df)
@@ -339,8 +390,8 @@ def build_snapshot():
         mss_bull, mss_bear = detect_mss(df)
         mss_shift = (po3_bias == "bullish" and mss_bull) or (po3_bias == "bearish" and mss_bear)
 
-        agreement_line = current_4h_open(htf_df, c.iloc[-1])
-        last_close = float(c.iloc[-1])
+        agreement_line = current_4h_open(htf_df, float(df["close"].iloc[-1]))
+        last_close = float(df["close"].iloc[-1])
         agreement_reclaim = (
             (po3_bias == "bullish" and last_close > agreement_line)
             or (po3_bias == "bearish" and last_close < agreement_line)
@@ -355,16 +406,23 @@ def build_snapshot():
 
         distribution_active = po3_phase == "DISTRIBUTION"
 
-        slope = ema_fast.iloc[-1] - ema_fast.iloc[-10]
-        structure_ok = abs(slope) > (c.iloc[-1] * 0.0002)
+        # ---------- Structure (NO EMA) ----------
+        # light structure_ok (generic): movement exists in last ~6 hours
+        recent = df.tail(24)
+        rng = float(recent["high"].max() - recent["low"].min())
+        structure_ok = rng > (last_close * 0.0005)
 
-        last_range = df["high"].iloc[-1] - df["low"].iloc[-1]
-        avg_range = (df["high"] - df["low"]).rolling(20).mean().iloc[-1]
-        liquidity_ok = last_range > avg_range * 1.05
+        # continuation structure: better, more permissive, directional
+        structure_ok_cont = structure_ok_continuation(df, po3_bias)
+
+        # ---------- Liquidity / Volatility ----------
+        last_range = float(df["high"].iloc[-1] - df["low"].iloc[-1])
+        avg_range = float((df["high"] - df["low"]).rolling(20).mean().iloc[-1])
+        liquidity_ok = bool(avg_range > 0 and last_range > avg_range * 1.05)
 
         a = atr(df).iloc[-1]
         a = float(a) if pd.notna(a) else 0.0
-        entry = float(c.iloc[-1])
+        entry = float(df["close"].iloc[-1])
 
         high_thr, extreme_thr = 0.006, 0.010
         if sym in ("XAUUSD", "XAGUSD", "WTI"):
@@ -375,9 +433,10 @@ def build_snapshot():
             "extreme" if atr_pct >= extreme_thr else "high" if atr_pct >= high_thr else "normal"
         )
 
+        # ---------- Stops/Targets ----------
         if po3_bias == "bullish":
             stop = entry - 1.2 * a
-            tp1 = entry + 2.0 * (entry - stop)  # TP1 at >=2R
+            tp1 = entry + 2.0 * (entry - stop)  # >=2R
         elif po3_bias == "bearish":
             stop = entry + 1.2 * a
             tp1 = entry - 2.0 * (stop - entry)
@@ -403,25 +462,12 @@ def build_snapshot():
         near_fvg = bool(fvg_ctx.get("near_fvg", False))
         fvg_score = float(fvg_ctx.get("fvg_score", 0.0))
 
-        # ✅ Entry confirmation (wick -> expansion)
+        # Entry confirmation (wick -> expansion)
         entry_confirmed, entry_confirm_type = detect_entry_confirmation(df, po3_bias)
+        entry_quality = entry_confirmed  # UI compatibility
 
-        # Keep entry_quality for UI compatibility only
-        entry_quality = entry_confirmed
-
-        if htf_df is not None and not htf_df.empty and len(htf_df) >= 20:
-            htf_close = htf_df["close"]
-            htf_fast = ema(htf_close, 20)
-            htf_slow = ema(htf_close, 50)
-            if htf_fast.iloc[-1] > htf_slow.iloc[-1]:
-                htf_bias = "bullish"
-            elif htf_fast.iloc[-1] < htf_slow.iloc[-1]:
-                htf_bias = "bearish"
-            else:
-                htf_bias = "neutral"
-        else:
-            htf_bias = "neutral"
-
+        # ---------- HTF alignment (NO EMA) ----------
+        htf_bias = price_action_bias(htf_df) if isinstance(htf_df, pd.DataFrame) else "neutral"
         htf_alignment = htf_bias in ("neutral", po3_bias)
 
         # PO3 active per confidence model.
@@ -446,31 +492,32 @@ def build_snapshot():
             "agreement_reclaim": agreement_reclaim,
             "mss_shift": mss_shift,
 
-            # ✅ NEW keys used by engine/scoring.py
             "entry_confirmed": entry_confirmed,
             "entry_confirm_type": entry_confirm_type,
-
-            # kept for any older UI references
-            "entry_quality": entry_quality,
+            "entry_quality": entry_quality,  # older UI refs
 
             "session_alignment": session_alignment,
             "session_valid_sniper": session_valid_sniper,
             "session_valid_continuation": session_valid_continuation,
+
             "htf_alignment": htf_alignment,
+            "htf_bias": htf_bias,
+
             "distribution_active": distribution_active,
             "session_name": session_label,
             "session_boost": 0.5 if sym in TOP_PRIORITY_UNIVERSE else 0.3,
+
             "structure_ok": structure_ok,
+            "structure_ok_continuation": structure_ok_cont,
+
             "liquidity_ok": liquidity_ok,
             "certified": certified,
             "rr": rr,
 
-            # FVG informational only
             "near_fvg": near_fvg,
             "fvg_score": fvg_score,
 
             "df": df,
-            "htf_bias": htf_bias,
             "news_risk": "against" if news_block else "none",
             "news_block": news_block,
             "volatility_risk": volatility_risk,

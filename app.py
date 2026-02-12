@@ -457,14 +457,22 @@ def build_snapshot():
             or (po3_bias == "bearish" and last_close < agreement_line)
         )
 
+        # --- PO3 phase (Option B: allow DISTRIBUTION without sweep when trend is running) ---
         if liquidity_sweep and not mss_shift:
             po3_phase = "MANIPULATION"
+        
         elif liquidity_sweep and mss_shift:
             po3_phase = "DISTRIBUTION"
+        
+        # ✅ NEW: if MSS is already present + continuation structure is clean,
+        # treat as distribution (trend leg running) even without a textbook sweep
+        elif mss_shift and structure_ok_cont:
+            po3_phase = "DISTRIBUTION"
+        
         else:
             po3_phase = "ACCUMULATION"
-
-        distribution_active = po3_phase == "DISTRIBUTION"
+        
+        distribution_active = (po3_phase == "DISTRIBUTION")
 
         # ---------- Structure (NO EMA) ----------
         recent = df.tail(24)

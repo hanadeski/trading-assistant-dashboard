@@ -29,6 +29,7 @@ def clamp(x: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, x))
 
 
+
 def build_score_breakdown(profile, factors: Dict) -> Dict[str, float]:
     """
     PO3 confidence model (max 10):
@@ -41,6 +42,9 @@ def build_score_breakdown(profile, factors: Dict) -> Dict[str, float]:
       HTF bias +1
 
     ✅ B2: If distribution_active True, add +0.5 bonus (continuation-friendly)
+
+    NOTE:
+      Sniper clean +1.0 is NOT added here — it's applied only at sniper execution check.
     """
     po3_active = bool(factors.get("po3_active", False))
     liquidity_sweep = bool(factors.get("liquidity_sweep", False))
@@ -50,10 +54,7 @@ def build_score_breakdown(profile, factors: Dict) -> Dict[str, float]:
     htf_alignment = bool(factors.get("htf_alignment", False))
     distribution_active = bool(factors.get("distribution_active", False))
 
-    # NOTE:
-    # We keep scoring compatible with older snapshots:
-    # - Prefer the setup-specific confirmations if present (sniper/continuation)
-    # - Otherwise fall back to the generic entry_confirmed
+    # Prefer setup-specific confirmations if present, else generic
     entry_confirmed_any = bool(
         factors.get("entry_confirmed_sniper", False)
         or factors.get("entry_confirmed_continuation", False)
@@ -68,7 +69,6 @@ def build_score_breakdown(profile, factors: Dict) -> Dict[str, float]:
     session_score = 1.0 if session_alignment else 0.0
     htf_score = 1.0 if htf_alignment else 0.0
 
-    # ✅ B2 bonus
     distribution_bonus = 0.5 if distribution_active else 0.0
 
     total_score = po3_score + sweep_score + agreement_score + mss_score + entry_score + session_score + htf_score
@@ -82,7 +82,7 @@ def build_score_breakdown(profile, factors: Dict) -> Dict[str, float]:
         "entry_score": entry_score,
         "session_score": session_score,
         "htf_score": htf_score,
-        "distribution_bonus": distribution_bonus,  # helpful for debugging
+        "distribution_bonus": distribution_bonus,
         "bias_score": 0.0,
         "structure_score": 0.0,
         "liquidity_score": 0.0,
@@ -120,15 +120,21 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
     structure_ok = bool(factors.get("structure_ok", False))
     structure_ok_cont = bool(factors.get("structure_ok_continuation", structure_ok))
 
-    # ✅ SETUP-CORRECT entry confirmation:
+    # Setup-correct entry confirmation
     entry_confirmed_sniper = bool(factors.get("entry_confirmed_sniper", factors.get("entry_confirmed", False)))
     entry_type_sniper = str(factors.get("entry_confirm_type_sniper", factors.get("entry_confirm_type", "none")))
 
     entry_confirmed_cont = bool(factors.get("entry_confirmed_continuation", factors.get("entry_confirmed", False)))
     entry_type_cont = str(factors.get("entry_confirm_type_continuation", factors.get("entry_confirm_type", "none")))
 
+    # Base score (includes B2 distribution bonus)
     score_breakdown = build_score_breakdown(profile, factors)
     confidence = float(score_breakdown["total_score"])
+
+    # ✅ Sniper-only clean bonus (+1.0) applied ONLY for sniper execution threshold checks
+    sniper_clean = bool(factors.get("sniper_clean", False))
+    sniper_bonus = 1.0 if sniper_clean else 0.0
+    sniper_confidence = clamp(confidence + sniper_bonus, 0.0, 10.0)
 
     base_meta = {
         "po3_phase": po3_phase,
@@ -141,6 +147,10 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
         "entry_confirm_type_continuation": entry_type_cont,
         "cisd_confirmed": bool(factors.get("cisd_confirmed", False)),
         "distribution_bonus": float(score_breakdown.get("distribution_bonus", 0.0)),
+        # debugging visibility:
+        "sniper_clean": bool(sniper_clean),
+        "sniper_bonus": float(sniper_bonus),
+        "sniper_confidence": float(sniper_confidence),
     }
 
     if rr < MIN_RR:
@@ -173,7 +183,8 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
         and po3_bias in ("bullish", "bearish")
     )
 
-    if sniper_ready and confidence >= EXECUTION_CONFIDENCE_MIN:
+    # ✅ Use sniper_confidence here (not global confidence)
+    if sniper_ready and sniper_confidence >= EXECUTION_CONFIDENCE_MIN:
         action = "BUY NOW" if po3_bias == "bullish" else "SELL NOW"
         trade_plan = {
             "entry": factors.get("entry", "TBD"),
@@ -183,13 +194,14 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
             "rr": rr,
         }
         meta = {**base_meta, "setup_type": "SNIPER", "entry_confirm_type": entry_type_sniper}
+        bonus_tag = " + clean bonus" if sniper_bonus > 0 else ""
         return Decision(
             symbol,
             po3_bias,
             "sniper",
-            confidence,
+            confidence,  # keep displayed confidence consistent
             action,
-            f"PO3 SNIPER ({entry_type_sniper}): accumulation → sweep → agreement reclaim → MSS." + news_note,
+            f"PO3 SNIPER ({entry_type_sniper}): accumulation → sweep → agreement reclaim → MSS.{bonus_tag}" + news_note,
             trade_plan,
             score=confidence,
             meta=meta,
@@ -209,6 +221,7 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
         and po3_bias in ("bullish", "bearish")
     )
 
+    # ✅ Continuation uses base confidence (unchanged)
     if continuation_ready and confidence >= SETUP_SCORE_THRESHOLD:
         action = "BUY NOW" if po3_bias == "bullish" else "SELL NOW"
         trade_plan = {

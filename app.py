@@ -225,6 +225,7 @@ def build_snapshot():
         c3_body = body(c3)
         body_ok = c3_body >= 0.35 * c3_rng
 
+        # NOTE: you already loosened to "high[-1] > high[-2]" / "low[-1] < low[-2]" style
         if po3_bias == "bullish":
             expands = (_f(c3["high"]) > _f(c2["high"])) and body_ok
         elif po3_bias == "bearish":
@@ -241,6 +242,60 @@ def build_snapshot():
             return True, "continuation_expansion"
         return True, "expansion"
 
+    def detect_cisd_protected_swing(df_15m: pd.DataFrame, po3_bias: str):
+        """
+        CISD / Protected swing confirmation (simple) - SNIPER ONLY
+
+        After MSS, you want a protected swing (pullback doesn't break prior extreme)
+        then continuation candle breaks pullback extreme with displacement.
+        """
+        if df_15m is None or df_15m.empty or len(df_15m) < 10:
+            return False, "none"
+
+        c2 = df_15m.iloc[-2]  # pullback / protected swing candle
+        c3 = df_15m.iloc[-1]  # continuation / displacement candle
+
+        def _f(x):
+            try:
+                return float(x)
+            except Exception:
+                return 0.0
+
+        def body(c):
+            return abs(_f(c["close"]) - _f(c["open"]))
+
+        def rng(c):
+            return max(_f(c["high"]) - _f(c["low"]), 1e-9)
+
+        c3_rng = rng(c3)
+        c3_body = body(c3)
+        body_ok = c3_body >= 0.35 * c3_rng
+
+        window = df_15m.iloc[-12:-2]  # exclude c2/c3
+        if window is None or len(window) < 5:
+            return False, "none"
+
+        prior_low = float(window["low"].min())
+        prior_high = float(window["high"].max())
+
+        c2_low = _f(c2["low"])
+        c2_high = _f(c2["high"])
+        c3_close = _f(c3["close"])
+
+        if po3_bias == "bullish":
+            protected = c2_low > prior_low
+            breaks = (c3_close > c2_high) and body_ok
+            if protected and breaks:
+                return True, "cisd_protected_swing"
+
+        if po3_bias == "bearish":
+            protected = c2_high < prior_high
+            breaks = (c3_close < c2_low) and body_ok
+            if protected and breaks:
+                return True, "cisd_protected_swing"
+
+        return False, "none"
+
     def price_action_bias(df_tf: pd.DataFrame) -> str:
         """
         NO EMA bias:
@@ -251,8 +306,8 @@ def build_snapshot():
         if df_tf is None or df_tf.empty or len(df_tf) < 50:
             return "neutral"
 
-        recent = df_tf.tail(24)         # last ~6 hours (15m) or last 4 days (4h tail depends on tf)
-        prev = df_tf.iloc[-48:-24]      # window before
+        recent = df_tf.tail(24)
+        prev = df_tf.iloc[-48:-24]
         if prev is None or len(prev) < 10:
             prev = df_tf.tail(48)
 
@@ -262,7 +317,6 @@ def build_snapshot():
         c0 = float(recent["close"].iloc[0])
         c1 = float(recent["close"].iloc[-1])
 
-        # directional progress
         up = (r_high > p_high) and (r_low > p_low) and (c1 > c0)
         dn = (r_high < p_high) and (r_low < p_low) and (c1 < c0)
 
@@ -281,7 +335,7 @@ def build_snapshot():
         if df_15m is None or df_15m.empty or len(df_15m) < 60:
             return False
 
-        recent = df_15m.tail(24)      # ~6 hours
+        recent = df_15m.tail(24)
         prev = df_15m.iloc[-48:-24]
         if prev is None or len(prev) < 10:
             prev = df_15m.tail(48)
@@ -291,17 +345,15 @@ def build_snapshot():
         prev_high = float(prev["high"].max())
         prev_low = float(prev["low"].min())
 
-        rng = recent_high - recent_low
+        rng_ = recent_high - recent_low
         last_close = float(df_15m["close"].iloc[-1])
         if last_close <= 0:
             return False
 
-        # Minimum movement: 0.06% of price (tunable)
         min_move = last_close * 0.0006
-        if rng < min_move:
+        if rng_ < min_move:
             return False
 
-        # Directional progress: new high (bull) / new low (bear)
         if po3_bias == "bullish":
             return (recent_high > prev_high) or (float(recent["close"].iloc[-1]) > float(recent["close"].iloc[0]))
         if po3_bias == "bearish":
@@ -314,7 +366,7 @@ def build_snapshot():
     flags = session_valid_flags(session_label)
     session_valid_sniper = flags["session_valid_sniper"]
     session_valid_continuation = flags["session_valid_continuation"]
-    session_alignment = session_valid_continuation  # used for confidence scoring
+    session_alignment = session_valid_continuation
 
     news_block = False
     try:
@@ -347,6 +399,14 @@ def build_snapshot():
                 "mss_shift": False,
                 "entry_confirmed": False,
                 "entry_confirm_type": "none",
+
+                # ✅ NEW: setup-specific entry flags (Sniper can be base OR CISD)
+                "entry_confirmed_sniper": False,
+                "entry_confirm_type_sniper": "none",
+                "entry_confirmed_continuation": False,
+                "entry_confirm_type_continuation": "none",
+                "cisd_confirmed": False,
+
                 "entry_quality": False,  # UI compatibility
                 "session_alignment": session_alignment,
                 "session_valid_sniper": session_valid_sniper,
@@ -407,12 +467,9 @@ def build_snapshot():
         distribution_active = po3_phase == "DISTRIBUTION"
 
         # ---------- Structure (NO EMA) ----------
-        # light structure_ok (generic): movement exists in last ~6 hours
         recent = df.tail(24)
         rng = float(recent["high"].max() - recent["low"].min())
         structure_ok = rng > (last_close * 0.0005)
-
-        # continuation structure: better, more permissive, directional
         structure_ok_cont = structure_ok_continuation(df, po3_bias)
 
         # ---------- Liquidity / Volatility ----------
@@ -462,8 +519,25 @@ def build_snapshot():
         near_fvg = bool(fvg_ctx.get("near_fvg", False))
         fvg_score = float(fvg_ctx.get("fvg_score", 0.0))
 
-        # Entry confirmation (wick -> expansion)
-        entry_confirmed, entry_confirm_type = detect_entry_confirmation(df, po3_bias)
+        # ---------- Entry confirmation ----------
+        # Base entry confirm (wick -> expansion) used by BOTH
+        entry_confirmed_base, entry_confirm_type_base = detect_entry_confirmation(df, po3_bias)
+
+        # CISD / protected swing = SNIPER ONLY
+        cisd_confirmed, cisd_type = detect_cisd_protected_swing(df, po3_bias)
+
+        # ✅ “1 of them, not all”:
+        # Sniper can confirm with base OR CISD
+        entry_confirmed_sniper = bool(entry_confirmed_base or cisd_confirmed)
+        entry_confirm_type_sniper = cisd_type if cisd_confirmed else entry_confirm_type_base
+
+        # Continuation uses only base (no CISD)
+        entry_confirmed_continuation = bool(entry_confirmed_base)
+        entry_confirm_type_continuation = entry_confirm_type_base
+
+        # Keep old keys for UI compatibility (shows base signal)
+        entry_confirmed = entry_confirmed_base
+        entry_confirm_type = entry_confirm_type_base
         entry_quality = entry_confirmed  # UI compatibility
 
         # ---------- HTF alignment (NO EMA) ----------
@@ -478,7 +552,7 @@ def build_snapshot():
             and liquidity_sweep
             and agreement_reclaim
             and mss_shift
-            and entry_confirmed
+            and entry_confirmed_sniper  # sniper confirmation used for certification
             and rr >= 2.0
         )
 
@@ -492,9 +566,17 @@ def build_snapshot():
             "agreement_reclaim": agreement_reclaim,
             "mss_shift": mss_shift,
 
+            # Base entry (for UI / legacy)
             "entry_confirmed": entry_confirmed,
             "entry_confirm_type": entry_confirm_type,
-            "entry_quality": entry_quality,  # older UI refs
+            "entry_quality": entry_quality,
+
+            # ✅ Setup-specific entry flags (engine/scoring.py will use these next)
+            "entry_confirmed_sniper": entry_confirmed_sniper,
+            "entry_confirm_type_sniper": entry_confirm_type_sniper,
+            "entry_confirmed_continuation": entry_confirmed_continuation,
+            "entry_confirm_type_continuation": entry_confirm_type_continuation,
+            "cisd_confirmed": bool(cisd_confirmed),
 
             "session_alignment": session_alignment,
             "session_valid_sniper": session_valid_sniper,

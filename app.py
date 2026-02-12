@@ -54,7 +54,7 @@ st.session_state.setdefault("last_alerted_ts", {})
 st.session_state.setdefault("last_snapshot_ts", 0)
 
 ALERT_COOLDOWN_SECS = 60 * 60
-ALERT_CONFIDENCE_MIN = 8.0
+ALERT_CONFIDENCE_MIN = 8.0  # used for SNIPER / default alert gate
 SNAPSHOT_INTERVAL_SECS = 30
 
 TOP_PRIORITY_UNIVERSE = {
@@ -81,6 +81,18 @@ def fail_soft(title: str, e: Exception):
         st.exception(e)
 
 
+def _alert_min_conf(decision) -> float:
+    """
+    Alert gating aligned with scoring/decision_layer:
+      - CONTINUATION can alert at 6.5 (since it can execute at 6.5)
+      - Everything else uses ALERT_CONFIDENCE_MIN (default 8.0)
+    """
+    setup = str((getattr(decision, "meta", {}) or {}).get("setup_type", "")).upper()
+    if setup == "CONTINUATION":
+        return 6.5
+    return float(ALERT_CONFIDENCE_MIN)
+
+
 def maybe_send_trade_alerts(decisions):
     now = int(time.time())
     last_action = st.session_state["last_alerted_action"]
@@ -89,7 +101,12 @@ def maybe_send_trade_alerts(decisions):
     for decision in decisions:
         if decision.action not in ("BUY NOW", "SELL NOW"):
             continue
-        if ALERT_HIGHCONF and decision.confidence < ALERT_CONFIDENCE_MIN:
+
+        min_conf = _alert_min_conf(decision)
+
+        # If High-confidence toggle is ON, still respect setup-specific thresholds
+        # (continuation can alert at 6.5; sniper stays at ALERT_CONFIDENCE_MIN)
+        if ALERT_HIGHCONF and decision.confidence < min_conf:
             continue
 
         last = last_action.get(decision.symbol)
@@ -193,18 +210,6 @@ def build_snapshot():
         body_ok_thr: float = 0.35,
         allow_soft_break: bool = True,
     ):
-        """
-        Entry Confirmation (your method):
-        - Candle2 = df[-2] wick candle
-        - Candle3 = df[-1] expansion candle
-
-        Base requirement:
-          - body_ok (default 0.35 * range, optionally 0.30 when narrative stacked)
-          - bullish: (high breaks c2 high) OR (close > midpoint of c2)  [soft break]
-          - bearish: (low breaks c2 low) OR (close < midpoint of c2)    [soft break]
-
-        Returns: (confirmed: bool, type: str)
-        """
         if df_15m is None or df_15m.empty or len(df_15m) < 5:
             return False, "none"
 
@@ -262,7 +267,6 @@ def build_snapshot():
         if not expands:
             return False, "none"
 
-        # keep your wick-ratio typing; append _soft if it was midpoint-only
         if c2_wick_ratio <= 0.55:
             base = "reversal_expansion"
         elif c2_wick_ratio >= 0.70:
@@ -283,22 +287,11 @@ def build_snapshot():
         body_ok_thr: float = 0.35,
         allow_soft_break: bool = True,
     ):
-        """
-        CISD / Protected swing confirmation (simple) - SNIPER ONLY
-
-        Protected swing candle (c2) doesn't break prior extreme, then displacement candle (c3) breaks
-        pullback extreme with body_ok.
-
-        Soft loosen:
-          - still require protected == True
-          - bullish break: (close > c2_high) OR (high > c2_high) if allow_soft_break
-          - bearish break: (close < c2_low) OR (low < c2_low) if allow_soft_break
-        """
         if df_15m is None or df_15m.empty or len(df_15m) < 10:
             return False, "none"
 
-        c2 = df_15m.iloc[-2]  # pullback / protected swing candle
-        c3 = df_15m.iloc[-1]  # continuation / displacement candle
+        c2 = df_15m.iloc[-2]
+        c3 = df_15m.iloc[-1]
 
         def _f(x):
             try:
@@ -316,7 +309,7 @@ def build_snapshot():
         c3_body = body(c3)
         body_ok = c3_body >= (body_ok_thr * c3_rng)
 
-        window = df_15m.iloc[-12:-2]  # exclude c2/c3
+        window = df_15m.iloc[-12:-2]
         if window is None or len(window) < 5:
             return False, "none"
 
@@ -335,7 +328,6 @@ def build_snapshot():
             hard_break = c3_close > c2_high
             soft_break = allow_soft_break and (c3_high > c2_high)
             breaks = body_ok and (hard_break or soft_break)
-
             if protected and breaks:
                 return True, "cisd_protected_swing_soft" if (soft_break and not hard_break) else "cisd_protected_swing"
 
@@ -344,19 +336,12 @@ def build_snapshot():
             hard_break = c3_close < c2_low
             soft_break = allow_soft_break and (c3_low < c2_low)
             breaks = body_ok and (hard_break or soft_break)
-
             if protected and breaks:
                 return True, "cisd_protected_swing_soft" if (soft_break and not hard_break) else "cisd_protected_swing"
 
         return False, "none"
 
     def price_action_bias(df_tf: pd.DataFrame) -> str:
-        """
-        NO EMA bias:
-        - bullish if recent highs/lows progress up + close progresses up
-        - bearish if recent highs/lows progress down + close progresses down
-        else neutral
-        """
         if df_tf is None or df_tf.empty or len(df_tf) < 50:
             return "neutral"
 
@@ -381,11 +366,6 @@ def build_snapshot():
         return "neutral"
 
     def structure_ok_continuation(df_15m: pd.DataFrame, po3_bias: str) -> bool:
-        """
-        Continuation structure (NO EMA):
-        - requires movement + directional progress
-        - avoids dead/chop but doesn't choke healthy trends
-        """
         if df_15m is None or df_15m.empty or len(df_15m) < 60:
             return False
 
@@ -453,18 +433,13 @@ def build_snapshot():
                 "mss_shift": False,
                 "entry_confirmed": False,
                 "entry_confirm_type": "none",
-
-                # setup-specific entry flags (Sniper can be base OR CISD)
                 "entry_confirmed_sniper": False,
                 "entry_confirm_type_sniper": "none",
                 "entry_confirmed_continuation": False,
                 "entry_confirm_type_continuation": "none",
                 "cisd_confirmed": False,
-
-                # sniper "clean" flag for scoring bonus (engine/scoring.py)
                 "sniper_clean": False,
-
-                "entry_quality": False,  # UI compatibility
+                "entry_quality": False,
                 "session_alignment": session_alignment,
                 "session_valid_sniper": session_valid_sniper,
                 "session_valid_continuation": session_valid_continuation,
@@ -491,7 +466,6 @@ def build_snapshot():
             }
             continue
 
-        # ---------- Bias (NO EMA) ----------
         trend_bias = price_action_bias(df)
 
         accumulation_detected = detect_accumulation(htf_df)
@@ -525,7 +499,6 @@ def build_snapshot():
             po3_phase = "MANIPULATION"
         elif liquidity_sweep and mss_shift:
             po3_phase = "DISTRIBUTION"
-        # if MSS is already present + continuation structure is clean, treat as distribution even without sweep
         elif mss_shift and structure_ok_cont:
             po3_phase = "DISTRIBUTION"
         else:
@@ -547,14 +520,12 @@ def build_snapshot():
             high_thr, extreme_thr = 0.008, 0.012
 
         atr_pct = (a / entry) if entry else 0.0
-        volatility_risk = (
-            "extreme" if atr_pct >= extreme_thr else "high" if atr_pct >= high_thr else "normal"
-        )
+        volatility_risk = "extreme" if atr_pct >= extreme_thr else "high" if atr_pct >= high_thr else "normal"
 
         # ---------- Stops/Targets ----------
         if po3_bias == "bullish":
             stop = entry - 1.2 * a
-            tp1 = entry + 2.0 * (entry - stop)  # >=2R
+            tp1 = entry + 2.0 * (entry - stop)
         elif po3_bias == "bearish":
             stop = entry + 1.2 * a
             tp1 = entry - 2.0 * (stop - entry)
@@ -575,17 +546,14 @@ def build_snapshot():
         else:
             tp2 = "TBD"
 
-        # FVG informational only (not a gate)
         fvg_ctx = compute_fvg_context(df, lookback=160, max_show=3)
         near_fvg = bool(fvg_ctx.get("near_fvg", False))
         fvg_score = float(fvg_ctx.get("fvg_score", 0.0))
 
         # ---------- Entry confirmation ----------
-        # (2) Dynamic body_ok loosen ONLY when narrative is stacked (sweep + MSS + agreement)
         stacked_narrative = bool(liquidity_sweep and mss_shift and agreement_reclaim)
         body_ok_thr = 0.30 if stacked_narrative else 0.35
 
-        # Base entry confirm (wick -> expansion) used by BOTH (with soft-break enabled)
         entry_confirmed_base, entry_confirm_type_base = detect_entry_confirmation(
             df,
             po3_bias,
@@ -593,7 +561,6 @@ def build_snapshot():
             allow_soft_break=True,
         )
 
-        # CISD / protected swing = SNIPER ONLY (also soft-break enabled)
         cisd_confirmed, cisd_type = detect_cisd_protected_swing(
             df,
             po3_bias,
@@ -601,27 +568,21 @@ def build_snapshot():
             allow_soft_break=True,
         )
 
-        # “1 of them, not all”: Sniper can confirm with base OR CISD
         entry_confirmed_sniper = bool(entry_confirmed_base or cisd_confirmed)
         entry_confirm_type_sniper = cisd_type if cisd_confirmed else entry_confirm_type_base
 
-        # Continuation uses only base (no CISD)
         entry_confirmed_continuation = bool(entry_confirmed_base)
         entry_confirm_type_continuation = entry_confirm_type_base
 
-        # Keep old keys for UI compatibility (shows base signal)
         entry_confirmed = entry_confirmed_base
         entry_confirm_type = entry_confirm_type_base
-        entry_quality = entry_confirmed  # UI compatibility
+        entry_quality = entry_confirmed
 
-        # ---------- HTF alignment (NO EMA) ----------
         htf_bias = price_action_bias(htf_df) if isinstance(htf_df, pd.DataFrame) else "neutral"
         htf_alignment = htf_bias in ("neutral", po3_bias)
 
-        # PO3 active per confidence model.
         po3_active = liquidity_sweep and mss_shift
 
-        # (3) sniper_clean flag used for scoring bonus (engine/scoring.py)
         sniper_clean = bool(accumulation_detected and liquidity_sweep and mss_shift and agreement_reclaim)
 
         certified = (
@@ -642,43 +603,30 @@ def build_snapshot():
             "liquidity_sweep": liquidity_sweep,
             "agreement_reclaim": agreement_reclaim,
             "mss_shift": mss_shift,
-
-            # Base entry (for UI / legacy)
             "entry_confirmed": entry_confirmed,
             "entry_confirm_type": entry_confirm_type,
             "entry_quality": entry_quality,
-
-            # Setup-specific entry flags
             "entry_confirmed_sniper": entry_confirmed_sniper,
             "entry_confirm_type_sniper": entry_confirm_type_sniper,
             "entry_confirmed_continuation": entry_confirmed_continuation,
             "entry_confirm_type_continuation": entry_confirm_type_continuation,
             "cisd_confirmed": bool(cisd_confirmed),
-
-            # NEW: clean sniper flag (for +1 bonus in engine/scoring.py)
             "sniper_clean": bool(sniper_clean),
-
             "session_alignment": session_alignment,
             "session_valid_sniper": session_valid_sniper,
             "session_valid_continuation": session_valid_continuation,
-
             "htf_alignment": htf_alignment,
             "htf_bias": htf_bias,
-
             "distribution_active": distribution_active,
             "session_name": session_label,
             "session_boost": 0.5 if sym in TOP_PRIORITY_UNIVERSE else 0.3,
-
             "structure_ok": structure_ok,
             "structure_ok_continuation": structure_ok_cont,
-
             "liquidity_ok": liquidity_ok,
             "certified": certified,
             "rr": rr,
-
             "near_fvg": near_fvg,
             "fvg_score": fvg_score,
-
             "df": df,
             "news_risk": "against" if news_block else "none",
             "news_block": news_block,

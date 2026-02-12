@@ -2,7 +2,11 @@ import time
 from typing import Dict, List
 
 import streamlit as st
-from engine.scoring import decide_from_factors, Decision
+from engine.scoring import (
+    decide_from_factors,
+    Decision,
+    SETUP_SCORE_THRESHOLD,
+)
 from engine.risk import apply_sizing
 
 COOLDOWN_SECS = 60 * 60  # 60 minutes
@@ -19,12 +23,29 @@ def _downgrade_to_wait(d: Decision, reason: str) -> Decision:
         confidence=d.confidence,
         action="WAIT",
         commentary=reason,
-        trade_plan=d.trade_plan,     # keep
-        score=d.score,              # keep
-        risk_pct=d.risk_pct,         # keep
-        size=d.size,                 # keep
-        meta=d.meta,                 # keep
+        trade_plan=d.trade_plan,  # keep
+        score=d.score,            # keep
+        risk_pct=d.risk_pct,      # keep
+        size=d.size,              # keep
+        meta=d.meta,              # keep
     )
+
+
+def _step4a_min_confidence(d: Decision) -> float:
+    """
+    Step 4A is a final "sanity gate" to stop accidental executions.
+    It MUST NOT block continuation trades that are allowed by scoring.
+
+    - Continuation executions are allowed at SETUP_SCORE_THRESHOLD (e.g. 6.5)
+    - Everything else keeps a slightly higher guardrail (7.0)
+    """
+    setup = str((d.meta or {}).get("setup_type", "")).upper()
+
+    if setup == "CONTINUATION":
+        return float(SETUP_SCORE_THRESHOLD)
+
+    # keep default guardrail for anything else (sniper is already gated in scoring.py)
+    return 7.0
 
 
 def run_decisions(profiles: List, factors_by_symbol: Dict[str, Dict]) -> List[Decision]:
@@ -49,11 +70,17 @@ def run_decisions(profiles: List, factors_by_symbol: Dict[str, Dict]) -> List[De
 
         proposed_action = d.action
 
-        # --- Step 4A execution gate ---
+        # --- Step 4A execution gate (setup-aware) ---
         if proposed_action in ("BUY NOW", "SELL NOW"):
-            # 1) Minimum confidence to allow execution (very low guardrail)
-            if d.confidence < 7.0:
-                d = _downgrade_to_wait(d, "Setup detected but confidence is extremely low (Step 4A).")
+            min_conf = _step4a_min_confidence(d)
+
+            # 1) Minimum confidence to allow execution (guardrail)
+            if d.confidence < min_conf:
+                setup = str((d.meta or {}).get("setup_type", "SETUP")).title()
+                d = _downgrade_to_wait(
+                    d,
+                    f"{setup} detected but confidence below {min_conf:.1f} (Step 4A)."
+                )
 
             # 2) Cooldown: prevent repeated same-direction firing
             last_action = last_fired.get(sym)

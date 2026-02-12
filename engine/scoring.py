@@ -243,7 +243,9 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
     # STANDBY messaging
     # -----------------------
     # For messaging, prefer to reference the correct setup-confirmations too.
-    if not liquidity_sweep:
+    if po3_phase == "ACCUMULATION" and structure_ok_cont:
+        commentary = "Trend developing; waiting for MSS/confirmation (not forcing sweep)."
+    elif not liquidity_sweep:
         commentary = "Waiting for valid liquidity sweep (Phase 2 manipulation)."
     elif liquidity_sweep and not mss_shift:
         commentary = "Sweep detected; waiting for 15m MSS and displacement confirmation."
@@ -254,7 +256,7 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
         commentary = "Distribution active; waiting for CONTINUATION entry confirmation (wick→expansion)."
     else:
         commentary = "No clean PO3 narrative yet (no forced trades)."
-
+        
     return Decision(
         symbol,
         po3_bias,

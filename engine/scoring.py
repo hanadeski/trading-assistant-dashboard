@@ -2,7 +2,8 @@ from dataclasses import dataclass, field
 from typing import Dict
 
 
-SETUP_SCORE_THRESHOLD = 7.0
+# ✅ B2: continuation threshold is 6.5, and distribution gets +0.5 score bonus
+SETUP_SCORE_THRESHOLD = 6.5
 EXECUTION_CONFIDENCE_MIN = 8.0
 MIN_RR = 2.0
 
@@ -38,6 +39,8 @@ def build_score_breakdown(profile, factors: Dict) -> Dict[str, float]:
       Entry confirmation +1     (uses setup-correct confirm if available)
       Session alignment +1
       HTF bias +1
+
+    ✅ B2: If distribution_active True, add +0.5 bonus (continuation-friendly)
     """
     po3_active = bool(factors.get("po3_active", False))
     liquidity_sweep = bool(factors.get("liquidity_sweep", False))
@@ -45,6 +48,7 @@ def build_score_breakdown(profile, factors: Dict) -> Dict[str, float]:
     mss_shift = bool(factors.get("mss_shift", False))
     session_alignment = bool(factors.get("session_alignment", False))
     htf_alignment = bool(factors.get("htf_alignment", False))
+    distribution_active = bool(factors.get("distribution_active", False))
 
     # NOTE:
     # We keep scoring compatible with older snapshots:
@@ -64,17 +68,11 @@ def build_score_breakdown(profile, factors: Dict) -> Dict[str, float]:
     session_score = 1.0 if session_alignment else 0.0
     htf_score = 1.0 if htf_alignment else 0.0
 
-    total_score = clamp(
-        po3_score
-        + sweep_score
-        + agreement_score
-        + mss_score
-        + entry_score
-        + session_score
-        + htf_score,
-        0.0,
-        10.0,
-    )
+    # ✅ B2 bonus
+    distribution_bonus = 0.5 if distribution_active else 0.0
+
+    total_score = po3_score + sweep_score + agreement_score + mss_score + entry_score + session_score + htf_score
+    total_score = clamp(total_score + distribution_bonus, 0.0, 10.0)
 
     return {
         "po3_score": po3_score,
@@ -84,6 +82,7 @@ def build_score_breakdown(profile, factors: Dict) -> Dict[str, float]:
         "entry_score": entry_score,
         "session_score": session_score,
         "htf_score": htf_score,
+        "distribution_bonus": distribution_bonus,  # helpful for debugging
         "bias_score": 0.0,
         "structure_score": 0.0,
         "liquidity_score": 0.0,
@@ -122,8 +121,6 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
     structure_ok_cont = bool(factors.get("structure_ok_continuation", structure_ok))
 
     # ✅ SETUP-CORRECT entry confirmation:
-    # - Sniper uses entry_confirmed_sniper (base OR CISD)
-    # - Continuation uses entry_confirmed_continuation (base only)
     entry_confirmed_sniper = bool(factors.get("entry_confirmed_sniper", factors.get("entry_confirmed", False)))
     entry_type_sniper = str(factors.get("entry_confirm_type_sniper", factors.get("entry_confirm_type", "none")))
 
@@ -140,10 +137,10 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
         "news_flag": bool(news_block),
         "htf_alignment": bool(htf_alignment),
         "structure_ok_continuation": bool(structure_ok_cont),
-        # for debugging / dashboard labels:
         "entry_confirm_type_sniper": entry_type_sniper,
         "entry_confirm_type_continuation": entry_type_cont,
         "cisd_confirmed": bool(factors.get("cisd_confirmed", False)),
+        "distribution_bonus": float(score_breakdown.get("distribution_bonus", 0.0)),
     }
 
     if rr < MIN_RR:
@@ -160,8 +157,7 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
         )
 
     # -----------------------
-    # SNIPER (reversal after manipulation)
-    # Only valid in ACCUMULATION / MANIPULATION phases
+    # SNIPER
     # -----------------------
     sniper_phase_ok = po3_phase in ("ACCUMULATION", "MANIPULATION")
 
@@ -171,7 +167,7 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
         and liquidity_sweep
         and agreement_reclaim
         and mss_shift
-        and entry_confirmed_sniper  # ✅ base OR CISD
+        and entry_confirmed_sniper
         and session_valid_sniper
         and rr >= MIN_RR
         and po3_bias in ("bullish", "bearish")
@@ -200,15 +196,14 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
         )
 
     # -----------------------
-    # CONTINUATION (trend leg already moving)
-    # Only valid in DISTRIBUTION phase
+    # CONTINUATION
     # -----------------------
     continuation_phase_ok = (po3_phase == "DISTRIBUTION") and distribution_active
 
     continuation_ready = (
         continuation_phase_ok
         and structure_ok_cont
-        and entry_confirmed_cont  # ✅ base only
+        and entry_confirmed_cont
         and session_valid_continuation
         and rr >= MIN_RR
         and po3_bias in ("bullish", "bearish")
@@ -242,7 +237,6 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
     # -----------------------
     # STANDBY messaging
     # -----------------------
-    # For messaging, prefer to reference the correct setup-confirmations too.
     if po3_phase == "ACCUMULATION" and structure_ok_cont:
         commentary = "Trend developing; waiting for MSS/confirmation (not forcing sweep)."
     elif not liquidity_sweep:
@@ -250,13 +244,12 @@ def decide_from_factors(symbol: str, profile, factors: Dict) -> Decision:
     elif liquidity_sweep and not mss_shift:
         commentary = "Sweep detected; waiting for 15m MSS and displacement confirmation."
     elif (liquidity_sweep and mss_shift) and not entry_confirmed_sniper:
-        # in ACC/MAN this is the relevant one (base OR CISD)
         commentary = "PO3 structure present; waiting for SNIPER entry confirmation (wick→expansion OR CISD)."
     elif continuation_phase_ok and not entry_confirmed_cont:
         commentary = "Distribution active; waiting for CONTINUATION entry confirmation (wick→expansion)."
     else:
         commentary = "No clean PO3 narrative yet (no forced trades)."
-        
+
     return Decision(
         symbol,
         po3_bias,

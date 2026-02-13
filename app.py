@@ -21,6 +21,7 @@ from engine.decision_layer import run_decisions
 from engine.fvg import compute_fvg_context
 from engine.portfolio import init_portfolio_state, update_portfolio
 from engine.profiles import get_profiles
+from engine.scoring import SETUP_SCORE_THRESHOLD  # ✅ keep continuation threshold consistent everywhere
 from state.session_state import init_session_state
 
 st.set_page_config(page_title="Trading Assistant", layout="wide", initial_sidebar_state="collapsed")
@@ -54,8 +55,14 @@ st.session_state.setdefault("last_alerted_ts", {})
 st.session_state.setdefault("last_snapshot_ts", 0)
 
 ALERT_COOLDOWN_SECS = 60 * 60
+CONTINUATION_ALERT_COOLDOWN_SECS = 25 * 60  # ✅ anti-spam: continuation alerts cooldown (per symbol)
 ALERT_CONFIDENCE_MIN = 8.0  # used for SNIPER / default alert gate
 SNAPSHOT_INTERVAL_SECS = 30
+
+# ✅ Entry strictness knobs
+SNIPER_BODY_OK_THR_STACKED = 0.30
+SNIPER_BODY_OK_THR_DEFAULT = 0.33  # slightly lenient even when not stacked
+CONTINUATION_BODY_OK_THR = 0.40    # stricter continuation confirmations
 
 TOP_PRIORITY_UNIVERSE = {
     "US100",  # NAS100
@@ -81,16 +88,44 @@ def fail_soft(title: str, e: Exception):
         st.exception(e)
 
 
+def _decision_setup_type(decision) -> str:
+    """
+    Prefer decision.meta["setup_type"], fallback to phase inference if missing.
+    (Keeps alerts resilient even if some upstream path forgot to set setup_type.)
+    """
+    meta = getattr(decision, "meta", {}) or {}
+    setup = str(meta.get("setup_type", "")).upper()
+
+    if setup in ("SNIPER", "CONTINUATION"):
+        return setup
+
+    # fallback inference
+    phase = str(meta.get("po3_phase", "")).upper()
+    if phase == "DISTRIBUTION":
+        return "CONTINUATION"
+    return "SNIPER"
+
+
 def _alert_min_conf(decision) -> float:
     """
     Alert gating aligned with scoring/decision_layer:
-      - CONTINUATION can alert at 6.5 (since it can execute at 6.5)
+      - CONTINUATION can alert at SETUP_SCORE_THRESHOLD (e.g. 6.5)
       - Everything else uses ALERT_CONFIDENCE_MIN (default 8.0)
     """
-    setup = str((getattr(decision, "meta", {}) or {}).get("setup_type", "")).upper()
+    setup = _decision_setup_type(decision)
     if setup == "CONTINUATION":
-        return 6.5
+        return float(SETUP_SCORE_THRESHOLD)
     return float(ALERT_CONFIDENCE_MIN)
+
+
+def _alert_cooldown_secs(decision) -> int:
+    """
+    Reduce alert spam for continuations without blocking trades.
+    """
+    setup = _decision_setup_type(decision)
+    if setup == "CONTINUATION":
+        return int(CONTINUATION_ALERT_COOLDOWN_SECS)
+    return int(ALERT_COOLDOWN_SECS)
 
 
 def maybe_send_trade_alerts(decisions):
@@ -109,9 +144,11 @@ def maybe_send_trade_alerts(decisions):
         if ALERT_HIGHCONF and decision.confidence < min_conf:
             continue
 
+        cooldown = _alert_cooldown_secs(decision)
+
         last = last_action.get(decision.symbol)
         last_time = last_ts.get(decision.symbol, 0)
-        in_window = (now - last_time) < ALERT_COOLDOWN_SECS
+        in_window = (now - last_time) < cooldown
 
         if in_window:
             if not ALERT_MODE3:
@@ -202,7 +239,7 @@ def build_snapshot():
         last_close = float(df_15m["close"].iloc[-1])
         return last_close > swing_high, last_close < swing_low
 
-    # ✅ UPDATED (1) soft break + (2) dynamic body_ok threshold when narrative stacked
+    # ✅ Entry confirmation helper (reused for sniper + continuation with different strictness)
     def detect_entry_confirmation(
         df_15m: pd.DataFrame,
         po3_bias: str,
@@ -550,34 +587,50 @@ def build_snapshot():
         near_fvg = bool(fvg_ctx.get("near_fvg", False))
         fvg_score = float(fvg_ctx.get("fvg_score", 0.0))
 
-        # ---------- Entry confirmation ----------
+        # ---------- Entry confirmation (SPLIT: sniper lenient / continuation strict) ----------
         stacked_narrative = bool(liquidity_sweep and mss_shift and agreement_reclaim)
-        body_ok_thr = 0.30 if stacked_narrative else 0.35
 
-        entry_confirmed_base, entry_confirm_type_base = detect_entry_confirmation(
+        sniper_body_thr = SNIPER_BODY_OK_THR_STACKED if stacked_narrative else SNIPER_BODY_OK_THR_DEFAULT
+
+        # Sniper: allow soft break (more signals)
+        entry_confirmed_base_sniper, entry_type_sniper_base = detect_entry_confirmation(
             df,
             po3_bias,
-            body_ok_thr=body_ok_thr,
+            body_ok_thr=sniper_body_thr,
             allow_soft_break=True,
         )
 
+        # Continuation: hard break only + higher body threshold (reduces spam)
+        entry_confirmed_base_cont, entry_type_cont_base = detect_entry_confirmation(
+            df,
+            po3_bias,
+            body_ok_thr=CONTINUATION_BODY_OK_THR,
+            allow_soft_break=False,
+        )
+
+        # Optional strong filter: continuation only accepts continuation-style expansions
+        cont_type_ok = str(entry_type_cont_base).startswith("continuation_expansion")
+        entry_confirmed_continuation = bool(entry_confirmed_base_cont and cont_type_ok)
+        entry_confirm_type_continuation = entry_type_cont_base if entry_confirmed_base_cont else "none"
+
+        # CISD / protected swing = SNIPER ONLY (soft-break enabled)
         cisd_confirmed, cisd_type = detect_cisd_protected_swing(
             df,
             po3_bias,
-            body_ok_thr=body_ok_thr,
+            body_ok_thr=sniper_body_thr,
             allow_soft_break=True,
         )
 
-        entry_confirmed_sniper = bool(entry_confirmed_base or cisd_confirmed)
-        entry_confirm_type_sniper = cisd_type if cisd_confirmed else entry_confirm_type_base
+        # Sniper can confirm with base OR CISD
+        entry_confirmed_sniper = bool(entry_confirmed_base_sniper or cisd_confirmed)
+        entry_confirm_type_sniper = cisd_type if cisd_confirmed else entry_type_sniper_base
 
-        entry_confirmed_continuation = bool(entry_confirmed_base)
-        entry_confirm_type_continuation = entry_confirm_type_base
+        # Legacy/UI keys (keep showing the more active “sniper base” signal)
+        entry_confirmed = bool(entry_confirmed_base_sniper)
+        entry_confirm_type = entry_type_sniper_base
+        entry_quality = entry_confirmed  # UI compatibility
 
-        entry_confirmed = entry_confirmed_base
-        entry_confirm_type = entry_confirm_type_base
-        entry_quality = entry_confirmed
-
+        # ---------- HTF alignment (NO EMA) ----------
         htf_bias = price_action_bias(htf_df) if isinstance(htf_df, pd.DataFrame) else "neutral"
         htf_alignment = htf_bias in ("neutral", po3_bias)
 
@@ -603,30 +656,43 @@ def build_snapshot():
             "liquidity_sweep": liquidity_sweep,
             "agreement_reclaim": agreement_reclaim,
             "mss_shift": mss_shift,
+
+            # Legacy/UI
             "entry_confirmed": entry_confirmed,
             "entry_confirm_type": entry_confirm_type,
             "entry_quality": entry_quality,
+
+            # Setup-specific entry flags
             "entry_confirmed_sniper": entry_confirmed_sniper,
             "entry_confirm_type_sniper": entry_confirm_type_sniper,
             "entry_confirmed_continuation": entry_confirmed_continuation,
             "entry_confirm_type_continuation": entry_confirm_type_continuation,
             "cisd_confirmed": bool(cisd_confirmed),
+
+            # Clean sniper flag (for +1 bonus in engine/scoring.py)
             "sniper_clean": bool(sniper_clean),
+
             "session_alignment": session_alignment,
             "session_valid_sniper": session_valid_sniper,
             "session_valid_continuation": session_valid_continuation,
+
             "htf_alignment": htf_alignment,
             "htf_bias": htf_bias,
+
             "distribution_active": distribution_active,
             "session_name": session_label,
             "session_boost": 0.5 if sym in TOP_PRIORITY_UNIVERSE else 0.3,
+
             "structure_ok": structure_ok,
             "structure_ok_continuation": structure_ok_cont,
+
             "liquidity_ok": liquidity_ok,
             "certified": certified,
             "rr": rr,
+
             "near_fvg": near_fvg,
             "fvg_score": fvg_score,
+
             "df": df,
             "news_risk": "against" if news_block else "none",
             "news_block": news_block,
@@ -641,7 +707,7 @@ def build_snapshot():
 
     decisions = run_decisions(profiles, factors_by_symbol)
 
-    # inject phase/setup metadata onto each decision for dashboard/alerts
+    # inject phase metadata onto each decision for dashboard/alerts (do NOT overwrite setup_type)
     for d in decisions:
         f = factors_by_symbol.get(d.symbol, {})
         d.meta = dict(getattr(d, "meta", {}) or {})

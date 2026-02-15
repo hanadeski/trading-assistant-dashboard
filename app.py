@@ -80,6 +80,7 @@ with st.sidebar.expander("⚙️ Safety toggles", expanded=False):
     ALERT_MODE3 = st.toggle("Telegram Mode 3 (opens + closes)", value=False)
     ALERT_HIGHCONF = st.toggle("High-confidence BUY/SELL alerts", value=True)
     LIVE_DATA = st.toggle("Live data (broker/API + fallback)", value=True)
+    SHOW_FEED_DEBUG = st.toggle("Show data feed provider", value=False)
 
 
 def fail_soft(title: str, e: Exception):
@@ -449,6 +450,14 @@ def build_snapshot():
         try:
             df = fetch_ohlc(sym, interval="15m", period="5d")
             htf_df = fetch_ohlc(sym, interval="4h", period="30d")
+
+            # DEBUG: show which data provider is being used
+            if SHOW_FEED_DEBUG:
+                st.write(
+                    sym,
+                    "15m:", df.attrs.get("provider"), df.attrs.get("used_ticker"),
+                    "| 4h:", htf_df.attrs.get("provider"), htf_df.attrs.get("used_ticker")
+                )
         except Exception:
             df = pd.DataFrame()
             htf_df = pd.DataFrame()

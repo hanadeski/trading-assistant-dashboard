@@ -9,12 +9,210 @@ import pandas as pd
 import streamlit as st
 import yfinance as yf
 
+# -----------------------
+# Optional MT5 support
+# -----------------------
+try:
+    import MetaTrader5 as mt5  # noqa
+except Exception:
+    mt5 = None
+
+
+def _read_secret(name: str) -> str:
+    val = os.getenv(name, "").strip()
+    if val:
+        return val
+    try:
+        return str(st.secrets.get(name, "")).strip()
+    except Exception:
+        return ""
+
+
+def _read_secret_json(name: str):
+    raw = _read_secret(name)
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except Exception:
+        return None
+
+
+# -----------------------
+# ICMarkets / MT5 symbol mapping
+# -----------------------
+# You can override any symbol explicitly by setting IC_SYMBOL_MAP_JSON in secrets/env, e.g:
+# {"XAUUSD":"XAUUSD.", "US100":"NAS100.", "UK100":"UK100."}
+IC_SYMBOL_MAP = _read_secret_json("IC_SYMBOL_MAP_JSON") or {}
+
+# Or use a suffix/prefix approach if your broker uses consistent suffixes:
+IC_SYMBOL_SUFFIX = _read_secret("IC_SYMBOL_SUFFIX")  # e.g "." or ".i" or "-ECN"
+IC_SYMBOL_PREFIX = _read_secret("IC_SYMBOL_PREFIX")  # rarely needed
+
+
+def _icmarkets_symbol(symbol: str) -> str:
+    if symbol in IC_SYMBOL_MAP:
+        return str(IC_SYMBOL_MAP[symbol])
+    s = f"{IC_SYMBOL_PREFIX}{symbol}{IC_SYMBOL_SUFFIX}"
+    return s
+
+
+# MT5 timeframe mapping
+MT5_TF = {
+    "1m": getattr(mt5, "TIMEFRAME_M1", None),
+    "5m": getattr(mt5, "TIMEFRAME_M5", None),
+    "15m": getattr(mt5, "TIMEFRAME_M15", None),
+    "30m": getattr(mt5, "TIMEFRAME_M30", None),
+    "1h": getattr(mt5, "TIMEFRAME_H1", None),
+    "4h": getattr(mt5, "TIMEFRAME_H4", None),
+    "1d": getattr(mt5, "TIMEFRAME_D1", None),
+}
+
+
+def _period_to_bars(period: str, interval: str) -> int:
+    period = (period or "5d").strip().lower()
+    unit = period[-1]
+    try:
+        value = int(period[:-1])
+    except Exception:
+        value = 5
+
+    # rough minutes
+    if unit == "d":
+        minutes = value * 24 * 60
+    elif unit == "w":
+        minutes = value * 7 * 24 * 60
+    elif unit == "m":
+        minutes = value * 30 * 24 * 60
+    else:
+        minutes = 5 * 24 * 60
+
+    def interval_minutes(i: str) -> int:
+        if i.endswith("m"):
+            return max(1, int(i[:-1]))
+        if i.endswith("h"):
+            return max(1, int(i[:-1]) * 60)
+        if i.endswith("d"):
+            return max(1, int(i[:-1]) * 1440)
+        return 15
+
+    bars = int(minutes / interval_minutes(interval))
+    return max(120, min(8000, bars))
+
+
+def _mt5_login_ok() -> bool:
+    if mt5 is None:
+        return False
+    login = _read_secret("MT5_LOGIN")
+    password = _read_secret("MT5_PASSWORD")
+    server = _read_secret("MT5_SERVER")
+    # If these aren’t set, we won’t even try.
+    return bool(login and password and server)
+
+
+def _mt5_init() -> bool:
+    """
+    Initialize MT5 only once per Streamlit session.
+    Works if your app runs on the same machine as the MT5 terminal.
+    """
+    if mt5 is None:
+        return False
+
+    # Cache init result in session state to avoid repeated init spam
+    if st.session_state.get("_mt5_inited") is True:
+        return True
+    if st.session_state.get("_mt5_inited") is False:
+        return False
+
+    login = _read_secret("MT5_LOGIN")
+    password = _read_secret("MT5_PASSWORD")
+    server = _read_secret("MT5_SERVER")
+    path = _read_secret("MT5_PATH")  # optional terminal path
+
+    try:
+        if path:
+            ok = mt5.initialize(path)
+        else:
+            ok = mt5.initialize()
+        if not ok:
+            st.session_state["_mt5_inited"] = False
+            return False
+
+        ok2 = mt5.login(int(login), password=password, server=server)
+        st.session_state["_mt5_inited"] = bool(ok2)
+        return bool(ok2)
+    except Exception:
+        st.session_state["_mt5_inited"] = False
+        return False
+
+
+def _fetch_mt5_ohlc(symbol: str, interval: str, period: str) -> pd.DataFrame:
+    """
+    Pull candles from MT5 terminal (ICMarkets) if configured.
+    """
+    if not _mt5_login_ok():
+        return pd.DataFrame()
+    if not _mt5_init():
+        return pd.DataFrame()
+
+    tf = MT5_TF.get(interval)
+    if tf is None:
+        return pd.DataFrame()
+
+    sym = _icmarkets_symbol(symbol)
+
+    # Ensure symbol is visible
+    try:
+        if not mt5.symbol_select(sym, True):
+            # maybe the raw symbol works
+            if not mt5.symbol_select(symbol, True):
+                return pd.DataFrame()
+            sym = symbol
+    except Exception:
+        return pd.DataFrame()
+
+    bars = _period_to_bars(period, interval)
+
+    try:
+        rates = mt5.copy_rates_from_pos(sym, tf, 0, bars)
+    except Exception:
+        rates = None
+
+    if rates is None or len(rates) == 0:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(rates)
+    # MT5 columns: time, open, high, low, close, tick_volume, spread, real_volume
+    if "time" not in df.columns:
+        return pd.DataFrame()
+
+    df["time"] = pd.to_datetime(df["time"], unit="s", utc=True)
+    df = df.set_index("time").sort_index()
+
+    # Standardize volume
+    if "tick_volume" in df.columns and "volume" not in df.columns:
+        df["volume"] = df["tick_volume"]
+
+    out = df[["open", "high", "low", "close", "volume"]].copy()
+    out = out.dropna()
+    if out.empty:
+        return pd.DataFrame()
+
+    out.attrs["used_ticker"] = sym
+    out.attrs["provider"] = "mt5"
+    return out
+
+
+# -----------------------
+# Your existing providers
+# -----------------------
+
 # Map our internal symbols -> Yahoo tickers
 YF_MAP = {
     # FX Majors
     "EURUSD": "EURUSD=X",
     "GBPUSD": "GBPUSD=X",
-    "USDJPY": "JPY=X",       # sometimes "USDJPY=X" works too
+    "USDJPY": "JPY=X",
     "USDCHF": "CHF=X",
     "AUDUSD": "AUDUSD=X",
     "NZDUSD": "NZDUSD=X",
@@ -27,9 +225,9 @@ YF_MAP = {
     "AUDJPY": "AUDJPY=X",
     "CADJPY": "CADJPY=X",
 
-    # Commodities (prefer futures for reliability on Streamlit Cloud)
-    "XAUUSD": "GC=F",        # Gold futures
-    "XAGUSD": "SI=F",        # Silver futures
+    # Commodities (NOTE: these will NOT match your broker CFD perfectly)
+    "XAUUSD": "GC=F",
+    "XAGUSD": "SI=F",
     "WTI": "CL=F",
 
     # Indices (approximations)
@@ -38,13 +236,11 @@ YF_MAP = {
     "US500": "^GSPC",
 }
 
-# Fallback tickers (try these if primary fails)
 YF_FALLBACKS = {
     "XAUUSD": ["GC=F", "XAUUSD=X"],
     "XAGUSD": ["SI=F", "XAGUSD=X"],
 }
 
-# Optional broker/API-grade feed mapping (OANDA)
 OANDA_MAP = {
     "EURUSD": "EUR_USD",
     "GBPUSD": "GBP_USD",
@@ -66,7 +262,6 @@ OANDA_MAP = {
     "US500": "SPX500_USD",
 }
 
-# Finnhub supports resolution by minute string/letter.
 INTERVAL_TO_FINNHUB = {
     "1m": "1",
     "5m": "5",
@@ -77,7 +272,6 @@ INTERVAL_TO_FINNHUB = {
     "1d": "D",
 }
 
-# We fetch Forex/CFD through OANDA symbols on Finnhub.
 FINNHUB_FOREX_MAP = {
     "EURUSD": "OANDA:EUR_USD",
     "GBPUSD": "OANDA:GBP_USD",
@@ -117,7 +311,6 @@ def _interval_minutes(interval: str) -> int:
 
 
 def _period_to_count(period: str, interval: str) -> int:
-    # Keeps calls bounded while retaining enough history for EMA/ATR.
     period = (period or "5d").strip().lower()
     unit = period[-1]
     try:
@@ -136,16 +329,6 @@ def _period_to_count(period: str, interval: str) -> int:
 
     bars = int(minutes / _interval_minutes(interval))
     return max(120, min(5000, bars))
-
-
-def _read_secret(name: str) -> str:
-    val = os.getenv(name, "").strip()
-    if val:
-        return val
-    try:
-        return str(st.secrets.get(name, "")).strip()
-    except Exception:
-        return ""
 
 
 def _fetch_finnhub_ohlc(symbol: str, interval: str, period: str) -> pd.DataFrame:
@@ -284,7 +467,6 @@ def _fetch_oanda_ohlc(symbol: str, interval: str, period: str) -> pd.DataFrame:
 def _fetch_yfinance_ohlc(symbol: str, interval: str, period: str) -> pd.DataFrame:
     yf_ticker = YF_MAP.get(symbol, symbol)
 
-    # Try primary + fallbacks
     tickers_to_try = YF_FALLBACKS.get(symbol)
     if not tickers_to_try:
         tickers_to_try = [yf_ticker]
@@ -305,11 +487,9 @@ def _fetch_yfinance_ohlc(symbol: str, interval: str, period: str) -> pd.DataFram
             if tmp is None or tmp.empty:
                 continue
 
-            # Flatten MultiIndex if present
             if hasattr(tmp.columns, "levels"):
                 tmp.columns = [c[0] if isinstance(c, tuple) else c for c in tmp.columns]
 
-            # Ensure numeric OHLC
             for col in ["Open", "High", "Low", "Close", "Volume"]:
                 if col in tmp.columns:
                     tmp[col] = pd.to_numeric(tmp[col], errors="coerce")
@@ -340,10 +520,11 @@ def _fetch_yfinance_ohlc(symbol: str, interval: str, period: str) -> pd.DataFram
     return pd.DataFrame()
 
 
-@st.cache_data(ttl=120, show_spinner=False)
+@st.cache_data(ttl=60, show_spinner=False)
 def fetch_ohlc(symbol: str, interval: str = "15m", period: str = "5d") -> pd.DataFrame:
     """
     Fetch OHLC using provider cascade:
+      0) MT5 (ICMarkets) if configured (MT5_LOGIN/MT5_PASSWORD/MT5_SERVER)
       1) Finnhub (if FINNHUB_API_KEY configured)
       2) OANDA (if OANDA_API_TOKEN configured)
       3) yfinance fallback
@@ -351,10 +532,17 @@ def fetch_ohlc(symbol: str, interval: str = "15m", period: str = "5d") -> pd.Dat
     Always returns a DataFrame (possibly empty) with columns:
     open/high/low/close/volume.
     """
-    for fetcher in (_fetch_finnhub_ohlc, _fetch_oanda_ohlc, _fetch_yfinance_ohlc):
+    fetchers = []
+
+    # Prefer MT5 if configured and available
+    if _mt5_login_ok():
+        fetchers.append(_fetch_mt5_ohlc)
+
+    fetchers.extend([_fetch_finnhub_ohlc, _fetch_oanda_ohlc, _fetch_yfinance_ohlc])
+
+    for fetcher in fetchers:
         df = fetcher(symbol, interval, period)
         if isinstance(df, pd.DataFrame) and not df.empty:
             return df
 
-    # Never return None (prevents app-side None bugs)
     return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])

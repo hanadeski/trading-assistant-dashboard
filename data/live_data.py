@@ -600,7 +600,7 @@ def fetch_ohlc(symbol: str, interval: str = "15m", period: str = "5d") -> pd.Dat
         fetchers.append(_fetch_tradingview_ohlc)
 
     # Then your old providers
-    fetchers.extend([_fetch_finnhub_ohlc, _fetch_oanda_ohlc, _fetch_yfinance_ohlc])
+    fetchers.extend([_fetch_finnhub_ohlc, _fetch_oanda_ohlc])
 
     for fetcher in fetchers:
         df = fetcher(symbol, interval, period)

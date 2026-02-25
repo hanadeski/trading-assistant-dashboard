@@ -764,16 +764,3 @@ else:
         with right:
             top = sorted(decisions, key=lambda d: d.confidence, reverse=True)
             render_ai_commentary(top[0] if top else None)
-# requirements.txt
-streamlit>=1.31
-streamlit-autorefresh>=1.0.1
-pandas>=2.0
-finnhub-python
-numpy>=1.24
-plotly>=5.18
-requests>=2.31
-yfinance>=0.2.40
-
-# Bridge runtime (optional in app container, required where ctrader_client.py runs)
-fastapi>=0.110
-uvicorn[standard]>=0.29

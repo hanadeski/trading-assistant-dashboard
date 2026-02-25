@@ -1,15 +1,12 @@
 streamlit>=1.31
 streamlit-autorefresh>=1.0.1
 pandas>=2.0
+finnhub-python
 numpy>=1.24
 plotly>=5.18
 requests>=2.31
-
-# existing market-data libs (can keep during transition)
-finnhub-python
 yfinance>=0.2.40
 
-# cTrader bridge runtime
+# Bridge runtime (optional in app container, required where ctrader_client.py runs)
 fastapi>=0.110
 uvicorn[standard]>=0.29
-ctrader-open-api

@@ -697,6 +697,49 @@ decisions_by_symbol = st.session_state.get("decisions_by_symbol", {})
 st.title("Trading Assistant")
 st.caption("PO3 Sniper-first mode (4H accumulation → manipulation → distribution).")
 st.divider()
+with st.sidebar.expander("🔎 Live Data Diagnostics", expanded=False):
+    if not st.session_state.get("snapshot_ready", False):
+        st.caption("Snapshot not ready yet.")
+    else:
+        rows = []
+        for p in profiles:
+            sym = p.symbol
+            f = factors_by_symbol.get(sym, {}) or {}
+            df = f.get("df", None)
+
+            provider = str(f.get("data_provider", "unknown"))
+            used_ticker = str(f.get("used_ticker", sym))
+            fetch_error = str(f.get("fetch_error", ""))
+
+            bars = 0
+            last_ts = ""
+            if df is not None and hasattr(df, "empty") and not df.empty:
+                bars = len(df)
+                try:
+                    last_ts = str(df.index[-1])
+                except Exception:
+                    last_ts = ""
+                # fallback if factor-level values missing
+                provider = provider or str(getattr(df, "attrs", {}).get("provider", "unknown"))
+                used_ticker = used_ticker or str(getattr(df, "attrs", {}).get("used_ticker", sym))
+                if not fetch_error:
+                    fetch_error = str(getattr(df, "attrs", {}).get("fetch_error", ""))
+
+            rows.append(
+                {
+                    "symbol": sym,
+                    "provider": provider,
+                    "used_ticker": used_ticker,
+                    "bars": bars,
+                    "last_bar_time": last_ts,
+                    "fetch_error": fetch_error,
+                    "mode": str(decisions_by_symbol.get(sym).mode if sym in decisions_by_symbol else ""),
+                    "confidence": float(decisions_by_symbol.get(sym).confidence if sym in decisions_by_symbol else 0.0),
+                    "action": str(decisions_by_symbol.get(sym).action if sym in decisions_by_symbol else ""),
+                }
+            )
+
+        st.dataframe(rows, use_container_width=True)
 
 if "snapshot_ready" not in st.session_state:
     st.session_state.snapshot_ready = False

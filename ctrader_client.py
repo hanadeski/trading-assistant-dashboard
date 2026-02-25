@@ -58,7 +58,8 @@ class CTraderAdapter:
     cTrader Open API adapter.
 
     IMPORTANT:
-    - This is the exact place to put your snippet/imports:
+    - This file is only a bridge shell until you implement the two methods below.
+    - Put this snippet/import in this file (NOT in app.py):
         from ctrader_open_api import Client, EndPoints, Auth
     - Put your auth/connect logic in `connect()`.
     - Put your historical-candle request logic in `fetch_candles()`.

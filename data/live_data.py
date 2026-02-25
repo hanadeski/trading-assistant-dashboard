@@ -89,7 +89,27 @@ def _read_secret(name: str) -> str:
     if val:
         return val
     try:
-        return str(st.secrets.get(name, "")).strip()
+        # flat secret key: CTRADER_CLIENT_ID
+        direct = str(st.secrets.get(name, "")).strip()
+        if direct:
+            return direct
+
+        # nested section support:
+        # [ctrader]
+        # client_id = "..."
+        # client_secret = "..."
+        # live_data_url = "..."
+        section = st.secrets.get("ctrader", {})
+        if isinstance(section, dict):
+            key = name.lower().replace("ctrader_", "")
+            nested = str(section.get(key, "")).strip()
+            if nested:
+                return nested
+            # allow dashed key variants too
+            nested2 = str(section.get(key.replace("_", "-"), "")).strip()
+            if nested2:
+                return nested2
+        return ""
     except Exception:
         return ""
 
@@ -186,7 +206,9 @@ def _fetch_ctrader_ohlc(symbol: str, interval: str, period: str) -> pd.DataFrame
     """
     base_url = _read_secret("CTRADER_LIVE_DATA_URL")
     if not base_url:
-        return pd.DataFrame()
+        out = pd.DataFrame()
+        out.attrs["fetch_error"] = "missing_ctrader_live_data_url"
+        return out
 
     sym = _canonical_symbol(symbol)
     ctrader_symbol = CTRADER_SYMBOL_MAP.get(sym, sym)
@@ -211,10 +233,14 @@ def _fetch_ctrader_ohlc(symbol: str, interval: str, period: str) -> pd.DataFrame
     try:
         r = requests.get(base_url, params=params, headers=headers, timeout=15)
         if r.status_code != 200:
-            return pd.DataFrame()
+            out = pd.DataFrame()
+            out.attrs["fetch_error"] = f"http_{r.status_code}"
+            return out
         payload = r.json() if r.text else {}
     except Exception:
-        return pd.DataFrame()
+        out = pd.DataFrame()
+        out.attrs["fetch_error"] = "request_failed"
+        return out
 
     if isinstance(payload, dict) and {"t", "o", "h", "l", "c"}.issubset(payload.keys()):
         t_vals = payload.get("t", [])
@@ -241,11 +267,15 @@ def _fetch_ctrader_ohlc(symbol: str, interval: str, period: str) -> pd.DataFrame
     elif isinstance(payload, list):
         df = pd.DataFrame(payload)
     else:
-        return pd.DataFrame()
+        out = pd.DataFrame()
+        out.attrs["fetch_error"] = "unexpected_payload_shape"
+        return out
 
     df = _normalize_candle_frame(df)
     if df.empty:
-        return pd.DataFrame()
+        out = pd.DataFrame()
+        out.attrs["fetch_error"] = "normalized_frame_empty"
+        return out
 
     df.attrs["used_ticker"] = ctrader_symbol
     df.attrs["provider"] = "ctrader"
@@ -265,7 +295,7 @@ def fetch_ohlc(symbol: str, interval: str = "15m", period: str = "5d") -> pd.Dat
         out = pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
         out.attrs["provider"] = "none"
         out.attrs["used_ticker"] = _canonical_symbol(symbol)
-        out.attrs["fetch_error"] = "ctrader_source_unavailable"
+        out.attrs["fetch_error"] = str(getattr(df, "attrs", {}).get("fetch_error", "ctrader_source_unavailable"))
         return out
 
     # Guard against stale bars

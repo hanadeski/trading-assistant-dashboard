@@ -40,6 +40,8 @@ def format_trade_alert(decision) -> str:
 
     meta = getattr(decision, "meta", {}) or {}
     setup_type = str(meta.get("setup_type", "NONE")).upper()
+    used_ticker = str(meta.get("used_ticker", "")).strip()
+    data_provider = str(meta.get("data_provider", "")).strip()
 
     tp = getattr(decision, "trade_plan", {}) or {}
     entry = tp.get("entry", getattr(decision, "entry", "N/A"))
@@ -62,9 +64,16 @@ def format_trade_alert(decision) -> str:
     else:
         header = "📡 SIGNAL"
 
+    source_line = ""
+    if used_ticker:
+        source_line = f"\nSource {used_ticker}"
+        if data_provider:
+            source_line += f" ({data_provider})"
+
     return (
         f"{header}\n"
-        f"{symbol} — {action}\n"
+        f"{symbol} — {action}"
+        f"{source_line}\n"
         f"Entry {entry}\n"
         f"SL {stop}\n"
         f"{tp_line}\n"

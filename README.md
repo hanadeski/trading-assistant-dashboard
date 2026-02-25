@@ -32,3 +32,12 @@ Set these Streamlit secrets/environment vars:
 - `CTRADER_TOKEN_URL` + `CTRADER_CLIENT_ID` + `CTRADER_CLIENT_SECRET` (optional client-credentials flow)
 
 Expected payload formats are documented in `data/live_data.py` inside `_fetch_ctrader_ohlc`.
+
+
+### Optional: run a local cTrader bridge (`ctrader_client.py`)
+If you want to connect directly with cTrader Open API SDK and still keep the dashboard on HTTP candles:
+
+1. Run the bridge service:
+   ```bash
+   pip install fastapi uvicorn ctrader-open-api
+   python ctrader_client.py

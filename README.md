@@ -50,5 +50,5 @@ If you want to connect directly with cTrader Open API SDK and still keep the das
 
 3. Start the bridge as a **separate running process** (keep terminal open):
    ```bash
-   pip install fastapi uvicorn ctrader-open-api
+   pip install fastapi uvicorn
    python ctrader_client.py

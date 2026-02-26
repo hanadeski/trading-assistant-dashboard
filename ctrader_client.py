@@ -9,8 +9,7 @@ How it works:
 1) Preferred: pull candles from an upstream HTTP source via CTRADER_UPSTREAM_CANDLES_URL.
 2) Optional: attempt direct SDK usage if `ctrader_open_api` is installed and exposes candle methods.
 
-Set dashboard secret:
-  CTRADER_LIVE_DATA_URL = "https://<this-bridge-host>/candles"
+This service is optional when the app runs direct SDK mode.
 """
 
 from __future__ import annotations

@@ -4,7 +4,9 @@
 1) Install deps:
    pip install -r requirements.txt
 
-2) Run:
+2) Set Streamlit secrets (see **cTrader SDK mode (no bridge URL)** below).
+
+3) Run:
    streamlit run app.py
 
 ## Telegram alerts (high-confidence only)
@@ -18,37 +20,30 @@ Set environment variables:
 
 Then restart Streamlit.
 
-## Notes
-- This Step 1 build uses mock data (no live feed yet).
-- Step 2 will wire in your real decision engine outputs + real charts.
-
-## cTrader live data source
-This app can use a cTrader-backed live data assistant endpoint as its only OHLC source.
+## cTrader SDK mode (no bridge URL)
+The dashboard now reads candles through `CTraderAdapter` directly in-process.
+You do **not** need `CTRADER_LIVE_DATA_URL` for this mode.
 
 Set these Streamlit secrets/environment vars:
-- `CTRADER_LIVE_DATA_URL` (required): endpoint that returns candles
-- `CTRADER_ACCESS_TOKEN` (optional bearer token)
-- `CTRADER_API_KEY` (optional custom gateway header)
-- `CTRADER_TOKEN_URL` + `CTRADER_CLIENT_ID` + `CTRADER_CLIENT_SECRET` (optional client-credentials flow)
+- `CTRADER_CLIENT_ID` (required)
+- `CTRADER_CLIENT_SECRET` (required)
+- `CTRADER_ACCOUNT_ID` (required)
 
-Expected payload formats are documented in `data/live_data.py` inside `_fetch_ctrader_ohlc`.
+Optional auth vars (only if your provider requires them):
+- `CTRADER_ACCESS_TOKEN`
+- `CTRADER_TOKEN_URL`
+- `CTRADER_API_KEY`
 
+### Streamlit Cloud secrets layout (copy/paste)
+```toml
+CTRADER_CLIENT_ID = "your_client_id"
+CTRADER_CLIENT_SECRET = "your_client_secret"
+CTRADER_ACCOUNT_ID = "your_account_id"
 
-### Optional: run a local cTrader bridge (`ctrader_client.py`)
-If you want to connect directly with cTrader Open API SDK and still keep the dashboard on HTTP candles:
+# Optional:
+# CTRADER_ACCESS_TOKEN = "your_access_token"
+# CTRADER_TOKEN_URL = "https://.../oauth/token"
+# CTRADER_API_KEY = "your_api_key"
 
-1. Create `ctrader_client.py` in the **repo root** (same folder level as `app.py`).
-   - In this repo it already exists at: `trading-assistant-dashboard/ctrader_client.py`.
-
-2. Implement real SDK calls inside:
-   - `CTraderAdapter.connect()`
-   - `CTraderAdapter.fetch_candles()`
-   
-   Your snippet:
-   - `from ctrader_open_api import Client, EndPoints, Auth`
-   belongs inside that file/methods (not in `app.py`).
-
-3. Start the bridge as a **separate running process** (keep terminal open):
-   ```bash
-   pip install fastapi uvicorn
-   python ctrader_client.py
+TELEGRAM_BOT_TOKEN = "your_telegram_bot_token"
+TELEGRAM_CHAT_ID = "your_telegram_chat_id"
